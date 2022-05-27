@@ -10,7 +10,8 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "justMyCode": true
+            "justMyCode": true,
+            "args": ["/Users/david/WorkingFiles/Python/adventure_games/zork2.db"]
         }
     ]
 }

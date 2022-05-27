@@ -2,12 +2,14 @@
 
 import os
 import sys
-from datetime import datetime, timedelta
+import math
 from typing import List, Tuple
 from enum import Enum
 from tkinter import *
 from tkinter import ttk
 from tkinter import filedialog as fd
+from tkinter import scrolledtext
+
 import regex
 import sqlite3
 
@@ -17,12 +19,14 @@ class Direction():
     x = 0.0
     y = 0.0
     z = 0.0
-    def __init__(self, id: int, name: str, x: float, y: float, z: float):
+    invert_id = 0
+    def __init__(self, id: int, name: str, x: float, y: float, z: float, invert: int):
         self.id = id
         self.name = name
         self.x = x
         self.y = y
         self.z = z
+        self.invert_id = invert
 
 
 class Room():
@@ -32,15 +36,47 @@ class Room():
     xpos = 0.0
     ypos = 0.0
     zpos = 0.0
+    visited = False  # temporary flag
+    bubble_bounds = (0,0,0,0)
     def __init__(self, id: int, name: str, desc: str = ""):
         self.id = id
         self.name = name
+    def set_position(self, x, y, z):
+        self.xpos = x
+        self.ypos = y
+        self.zpos = z
+    def connection_points(self) -> list:
+        # midpoints and corners of bounds, plus a set of alternates
+        x1, y1, x2, y2 = self.bubble_bounds
+        width = x2 - x1
+        height = y2 - y1
+
+        nw = (x1 + width/8, y1 + height/8)
+        n = (x1 + width/2, y1)
+        ne = (x1 + width - (width/8), y1 + height/8)
+        w = (x1, y1 + height/2)
+        e = (x1 + width, y1 + height/2)
+        sw = (x1 + width/8, y1 + height - (height/8))
+        s = (x1 + width/2, y1 + height)
+        se = (x1 + width - (width/8), y1 + height - (height/8))
+
+        alt_nw = (x1 + width/4, y1)
+        alt_n = (x1 + (5*width/8), y1)
+        alt_ne = (x1 + (3*width/4), y1)
+        alt_w = (x1, y1 + (3*height/8))
+        alt_e = (x1 + width, y1 + (3*height/8))
+        alt_sw = (x1, y1 + (3*height/4))
+        alt_s = (x1 + (5*width/8), y1 + height)
+        alt_se = (x1 + width, y1 + (3*height/4))
+        return [nw, n, ne, w, e, sw, s, se, alt_nw, alt_n, alt_ne, alt_w, alt_e, alt_sw, alt_s, alt_se]
 
 
 class Path():
     direction: Direction = None
     to_room: Room = None
     from_room: Room = None
+
+    drawn = False  # flag to say whether we've already drawn this path on map
 
     def __init__(self, direction: Direction, to_room: Room, from_room: Room) -> None:
         self.direction = direction
@@ -59,10 +95,13 @@ with open(os.path.join(".", "create_new.sql"), "r") as sfile:
 
 db_folder = my_folder
 db_path = ""
+if len(sys.argv) > 1:
+    db_path = sys.argv[1]
+
 rooms: List[Room] = []
 directions: List[Direction] = []
 paths: List[Path] = []
-combos: List[ttk.Combobox] = []
+# combos: List[ttk.Combobox] = []
 
 def room_names() -> list:
     ret_list = ["0: NEW ROOM"]
@@ -72,7 +111,7 @@ def room_names() -> list:
 
 
 def room_names_no_new() -> list:
-    ret_list = []
+    ret_list = ["0: Nowhere"]
     for room in rooms:
         ret_list.append(f"{room.id}: {room.name}")
     return ret_list
@@ -96,6 +135,7 @@ window.config(bg=LIGHT_GRAY)
 
 current_room: Room = None
 db_lab: Label = None
+name_lab: Label = None
 name_entry: Entry = None
 desc_text: Text = None
 button_pane: Frame = None
@@ -104,6 +144,7 @@ data_pane: Frame = None
 direction_var = StringVar()
 room_var = StringVar()
 room_var_2 = StringVar()
+
 
 def create_new_db(path_to_db: str):
     conn = sqlite3.connect(path_to_db)
@@ -159,9 +200,9 @@ def load_data(path_to_db: str):
         name = row[1]
         aroom = Room(id, name)
         aroom.description = row[2]
-        aroom.xpos = row[4]
-        aroom.ypos = row[5]
-        aroom.zpos = row[6]
+        aroom.xpos = row[3]
+        aroom.ypos = row[4]
+        aroom.zpos = row[5]
         rooms.append(aroom)
     sql = "SELECT * FROM DIRECTIONS "
     cursor.execute(sql)
@@ -172,7 +213,8 @@ def load_data(path_to_db: str):
         x = row[2]
         y = row[3]
         z = row[4]
-        direction = Direction(id, name, x, y, z)
+        invert = row[5]
+        direction = Direction(id, name, x, y, z, invert)
         directions.append(direction)
     sql = "SELECT * FROM PATHS "
     cursor.execute(sql)
@@ -186,6 +228,7 @@ def load_data(path_to_db: str):
         to_room = get_room_from_id(to_id)
         path = Path(direction, to_room, from_room)
         paths.append(path)
+    
 
 def clear_combo(combo: ttk.Combobox):
     combo.delete(0,END)
@@ -196,14 +239,17 @@ def clear_combo(combo: ttk.Combobox):
 def do_nothing():
     pass
 
-def open_existing():
+
+def open_existing(from_args: bool = False):
     global db_path
-    db_path = get_existing_file(my_folder)
+    if not from_args:
+        db_path = get_existing_file(my_folder)
     if db_path:
         if db_lab:
             db_lab.config(text=f"Game file: {db_path}")
         load_data(db_path)
         go_to_room(1)
+        # display_map(10.0)  
 
 
 def create_new():
@@ -235,17 +281,18 @@ def draw_menu(window: Tk):
 
 def update_room_details():
     if current_room:
-        current_room.name = name_entry.get()
-        current_room.description = desc_text.get('1.0', END)
-        sql = f'UPDATE ROOMS SET Name = "{name}", Description = "{desc}" WHERE Id = {current_room.id}'
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute(sql)
-        conn.commit()
+        temp_name = name_entry.get()
+        temp_desc = desc_text.get('1.0', END)
+        # only rewrite if changed.
+        if (not current_room.name == temp_name) or (not current_room.description == temp_desc):
+            current_room.name = temp_name
+            current_room.description = temp_desc
+            sql = f'UPDATE ROOMS SET Name = "{temp_name}", Description = "{temp_desc}" WHERE Id = {current_room.id}'
+            db_execute(sql)
 
 
 def draw_controls(window: Tk):
-    global db_lab, name_entry, desc_text, button_pane, new_path_pane, data_pane
+    global db_lab, name_lab, name_entry, desc_text, button_pane, new_path_pane, data_pane
 
     db_lab = Label(window, text="Game file: none selected", bg=LIGHT_GRAY)
     db_lab.pack(side=TOP, pady=5, fill=X)
@@ -296,7 +343,7 @@ def get_path_from_id(id: int) -> Direction:
             return path
     return None
 
-def get_paths_for_room(room_id: int) -> list:
+def get_outward_paths(room_id: int) -> list:
     path_list = []
     for path in paths:
         if path.from_room:
@@ -304,21 +351,51 @@ def get_paths_for_room(room_id: int) -> list:
                 path_list.append(path)
     return path_list
 
+
+def get_unvisited_paths(room_id: int) -> list:
+    path_list = []
+    for path in paths:
+        if path.from_room.id == room_id and not path.to_room.visited:
+            path_list.append(path)
+    return path_list
+
+
+def get_inward_paths(room_id: int) -> list:
+    path_list = []
+    for path in paths:
+        if path.to_room:
+            if path.to_room.id == room_id:
+                path_list.append(path)
+    return path_list
+
+
+def distance_between(room1: Room, room2: Room) -> float:
+    return math.sqrt((room2.xpos - room1.xpos) ** 2 + (room2.ypos - room1.ypos) ** 2)
+
+
+def get_max_room_distance() -> float:
+    max_distance = 0.0
+    for room in rooms:
+        distance = math.sqrt(room.xpos ** 2 + room.ypos ** 2)
+        if distance > max_distance:
+            max_distance = distance
+    return max_distance
+
+
 def add_unconnected_room():
     # it's a new room, create an empty one first
-    sql = f'INSERT INTO ROOMS (Name, Description) VALUES ("New Room", "Description")'
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute(sql)
-    conn.commit()
-    new_id = cursor.lastrowid
+    # we need to place it geometrically in a different area until we update it with a new path to it
+    fudge = int(get_max_room_distance()) + 50.0
+    sql = f'INSERT INTO ROOMS (Name, Description, X, Y, Z) VALUES ("New Room", "Description", {fudge}, {fudge}, {0.0})'
+    new_id = db_execute_get_id(sql)
     new_room = Room(new_id, "New Room", "Description")
+    new_room.set_position(fudge, fudge, 0.0)
     rooms.append(new_room)
     update_room_details()  #updates current room
     go_to_room(new_id)
 
 
-def add_path_to_room(from_id: int, direct_str: str, room_str: str):
+def add_path_to_room(from_id: int, direct_str: str, room_str: str, mutual: bool = False):
     direct_id = 0
     to_id = 0
     match = regex.search(r"^(\d+):", direct_str)
@@ -334,26 +411,121 @@ def add_path_to_room(from_id: int, direct_str: str, room_str: str):
 
     if to_id == 0: # it's a new room, create an empty one first
         sql = f'INSERT INTO ROOMS (Name, Description) VALUES ("New Room", "Description")'
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute(sql)
-        conn.commit()
-        to_id = cursor.lastrowid
+        to_id = db_execute_get_id(sql)
         new_room = Room(to_id, "New Room", "Description")
         rooms.append(new_room)
 
+    direction = get_direction_from_id(direct_id)
+    to_room = get_room_from_id(to_id)
+    from_room = get_room_from_id(from_id)
+    
+    # need to test for duplicates
+    check_paths = [p for p in paths if (p.direction == direction) and (p.from_room == from_room) and (p.to_room == to_room)]
+    if check_paths:  # then we already have an identical path, so get out of the routine
+        return
+
     sql = f'INSERT INTO PATHS (DirectionID, FromID, ToID) VALUES({direct_id}, {from_id}, {to_id});'
+    db_execute(sql)
+
+    path = Path(direction=direction, to_room=to_room, from_room=from_room)
+    paths.append(path)
+    set_room_coordinates(path)
+    if mutual:
+        reverse_direction = get_direction_from_id(direction.invert_id)
+        # need to test for duplicates
+        check_paths = [p for p in paths if (p.direction == reverse_direction) and (p.from_room == to_room) and (p.to_room == from_room)]
+        if not check_paths:  # OK, no duplicate         
+            sql = f'INSERT INTO PATHS (DirectionID, FromID, ToID) VALUES({direction.invert_id}, {to_id}, {from_id});'
+            db_execute(sql)
+            path = Path(direction=reverse_direction, to_room=from_room, from_room=to_room)
+            paths.append(path)
+    update_room_details()
+    go_to_room(to_id)
+
+def db_execute(sql):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute(sql)
     conn.commit()
-    direction = get_direction_from_id(direct_id)
-    to_room = get_room_from_id(to_id)
-    from_room = get_room_from_id(from_id)
-    path = Path(direction=direction, to_room=to_room, from_room=from_room)
-    paths.append(path)
-    update_room_details()
-    go_to_room(to_id)
+
+def db_execute_get_id(sql) -> int:
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute(sql)
+    conn.commit()
+    return cursor.lastrowid
+
+
+recurse_depth = 0
+
+def set_room_coordinates(path: Path, outward: bool = True):
+    # set room coordinates based on path direction
+    direction = path.direction
+    to_room = path.to_room
+    from_room = path.from_room
+    if outward:
+        if to_room.visited:
+            return
+        to_room.xpos = from_room.xpos + direction.x * 10
+        to_room.ypos = from_room.ypos + direction.y * 10
+        to_room.zpos = from_room.zpos + direction.z * 5
+    else:
+        if from_room.visited:
+            return
+        inverse = get_direction_from_id(direction.invert_id)
+        from_room.xpos = to_room.xpos + inverse.x * 10
+        from_room.ypos = to_room.ypos + inverse.y * 10
+        from_room.zpos = to_room.zpos + inverse.z * 5
+
+    sql=f'UPDATE ROOMS SET X = {to_room.xpos}, Y = {to_room.ypos}, Z = {to_room.zpos} WHERE ID = {to_room.id}'
+    db_execute(sql)
+
+
+def get_distance_to_nearest(this_room) -> float:
+    # check distance from connected rooms
+    min_distance = 100000    # has to be smaller than this!!
+    for other_room in rooms:
+        if not other_room.id == this_room.id:
+            if other_room.visited:
+                dist = distance_between(other_room, this_room)
+                if dist < min_distance:
+                    min_distance = dist
+    return min_distance
+
+
+def reset_room_coordinates(room: Room):
+    global recurse_depth
+    recurse_depth += 1
+    if recurse_depth > 2 or recurse_depth < 0:
+        return
+    # print(f"depth is {recurse_depth} within : {room.name}")
+    out_paths = get_outward_paths(room.id)
+    for path in out_paths:
+        set_room_coordinates(path)
+        if not path.to_room.visited:
+            # print(f"going to: {path.to_room.name}")
+            path.to_room.visited = True
+            reset_room_coordinates(path.to_room)  # recursive!
+            recurse_depth -= 1
+        else:
+            # print(f"already visited: {path.to_room.name}")
+            pass
+    in_paths = get_inward_paths(room.id)
+    for path in in_paths:
+        set_room_coordinates(path)
+
+
+def reset_all_room_coordinates(starting_room: Room):
+    # clear out current values
+    for room in rooms:
+        room.set_position(0.0, 0.0, 0.0)  
+        room.bubble_bounds = (0,0,0,0)
+        room.visited = False
+    sql=f'UPDATE ROOMS SET X = 0.0, Y = 0.0, Z = 0.0'
+    db_execute(sql)
+
+    starting_room.visited = True
+    reset_room_coordinates(starting_room)
 
 
 def draw_new_path_controls(room_id: id):
@@ -361,22 +533,28 @@ def draw_new_path_controls(room_id: id):
     if new_path_pane:
         label0 = Label(new_path_pane, text="Add new path or room", bg=LIGHT_GRAY)
         label0.pack(side=TOP, pady=5)
-        label1 = Label(new_path_pane, text="Direction: ", bg=LIGHT_GRAY)
+        inside_pane = Frame(new_path_pane, bg=LIGHT_GRAY, height=100, highlightbackground=DARK_GRAY, highlightthickness=1)
+        inside_pane.pack(side=TOP, pady=5)
+        label1 = Label(inside_pane, text="Direction: ", bg=LIGHT_GRAY)
         label1.pack(side=LEFT, padx=5)
-        direction_combo = ttk.Combobox(new_path_pane, width=20, textvariable=direction_var)
+        direction_combo = ttk.Combobox(inside_pane, width=20, textvariable=direction_var)
         direction_combo.config(values=direction_names())
         direction_combo.current(0)
         direction_combo.pack(side=LEFT, padx=5)
-        label2 = Label(new_path_pane, text="Room: ", bg=LIGHT_GRAY)
+        label2 = Label(inside_pane, text="Room: ", bg=LIGHT_GRAY)
         label2.pack(side=LEFT, padx=5)
-        rooms_combo = ttk.Combobox(new_path_pane, width=20, textvariable=room_var)
+        rooms_combo = ttk.Combobox(inside_pane, width=20, textvariable=room_var)
         rooms_combo.config(values=room_names())
         rooms_combo.current(0)
         rooms_combo.pack(side=LEFT, padx=5)
-        button = Button(new_path_pane, text="Create Path", command=lambda: add_path_to_room(room_id, direction_var.get(), room_var.get()))
-        button.pack(side=LEFT, padx=5)
-        new_room_but = Button(window, text="Create Unconnected Room", command=add_unconnected_room)
+        button = Button(inside_pane, text="Create 1-Way Path", command=lambda: add_path_to_room(room_id, direction_var.get(), room_var.get()))
+        button.pack(side=LEFT, padx=5, fill=X)
+        button3 = Button(inside_pane, text="Create 2-Way Paths", command=lambda: add_path_to_room(room_id, direction_var.get(), room_var.get(), mutual=True))
+        button3.pack(side=LEFT, padx=5, fill=X)
+        new_room_but = Button(new_path_pane, text="Create Unconnected Room", command=add_unconnected_room)
         new_room_but.pack(side=TOP, padx=5)
+        map_but = Button(new_path_pane, text="Show Map", command=make_map_window)
+        map_but.pack(side=TOP, pady=5)
 
 def go_to_room_from_combo(event):
     room_str = room_var_2.get()
@@ -388,16 +566,21 @@ def go_to_room_from_combo(event):
         return
 
 def go_to_room(room_id):
-    global window, button_pane, new_path_pane, data_pane, current_room, room_var_2
-    room = get_room_from_id(room_id)
-    if room:
-        current_room = room
+    global window, button_pane, new_path_pane, data_pane, current_room, room_var_2, name_lab, name_entry
+    next_room = get_room_from_id(room_id)
+    if next_room:
+        current_room = next_room
+        if name_lab:
+            new_text = f'Room {room_id}:'
+            name_lab.config(text=new_text)
         if name_entry:
             name_entry.delete(0, END)
-            name_entry.insert(0, room.name)
+            name_entry.insert(0, next_room.name)
         if desc_text:
             desc_text.delete('1.0', END)
-            desc_text.insert('1.0', room.description)
+            desc_text.insert('1.0', next_room.description)
+    else:
+        return
     if button_pane:
         button_pane.destroy()
     button_pane = Frame(data_pane, bg=LIGHT_GRAY, height=500, highlightbackground=DARK_GRAY, highlightthickness=1)
@@ -411,22 +594,173 @@ def go_to_room(room_id):
     other_rooms_combo.bind('<<ComboboxSelected>>', go_to_room_from_combo)
     other_rooms_combo.pack(side=LEFT, padx=5)
     other_rooms_pane.pack(side=TOP, pady=5)
-    path_list = get_paths_for_room(room_id=room.id)
-    for path in path_list:
-        path_pane = Frame(button_pane, bg=LIGHT_GRAY, highlightbackground=DARK_GRAY, highlightthickness=1)
-        path_pane.pack(side=TOP, pady=5)
-        label = Label(path_pane, bg=LIGHT_GRAY, text=f"{path.direction.name}: ")
-        label.pack(side=LEFT, padx=5)
-        button = Button(path_pane, text=path.to_room.name, relief=RAISED, command=lambda: go_to_room(path.to_room.id))
-        button.pack(side=LEFT, padx=5)
+    outward_paths = get_outward_paths(room_id=next_room.id)
+    # inward_paths = get_inward_paths(room_id=next_room.id)
+   
+    for path in outward_paths:
+        place_buttons(path)
+
     if new_path_pane:
         new_path_pane.destroy()
     new_path_pane = Frame(window, bg=LIGHT_GRAY, height=200, highlightbackground=DARK_GRAY, highlightthickness=1)
     new_path_pane.pack(side=TOP, pady=5)
     draw_new_path_controls(room_id)
+
+    navig_button = Button(window, text="Get Navigation Commands", command=show_textpath_window)
+    navig_button.pack(side=TOP, pady=5)
+
+def delete_path(path: Path, path_pane: Frame):
+    sql = f'DELETE FROM PATHS WHERE DIRECTIONID = {path.direction.id} AND FROMID = {path.from_room.id} AND TOID = {path.to_room.id}'
+    db_execute(sql)
+    paths.remove(path)
+    path_pane.destroy()
+
+
+def place_buttons(path):
+    global button_pane
+    path_pane = Frame(button_pane, bg=LIGHT_GRAY, highlightbackground=DARK_GRAY, highlightthickness=1)
+    label = Label(path_pane, bg=LIGHT_GRAY, text=f"{path.direction.id}: {path.direction.name}: ")
+    label.pack(side=LEFT, padx=5)
+    go_button = Button(path_pane, text=f"{path.to_room.id}: {path.to_room.name}", relief=RAISED, command=lambda: go_to_room(path.to_room.id))
+    go_button.pack(side=LEFT, padx=5)
+    delete_button = Button(path_pane, text="X", relief=RAISED, command=lambda: delete_path(path, path_pane))
+    delete_button.pack(side=LEFT, padx=5)
+    path_pane.pack(side=TOP, pady=5)
         
+
+map_window: Tk = None
+map_canvas: Canvas = None
+current_map_room: Room = None
+factor: float = 5.0
+offset_x: int = 0
+offset_y: int = 0
+
+def factored_point(point: Tuple[float, float]) -> Tuple[float, float]:
+    x, y = point
+    x_factored = x  * factor * 2 + offset_x
+    y_factored = y * factor + offset_y
+    return (x_factored, y_factored)
+
+
+def map_clicked(event):
+    global current_map_room, map_canvas
+    # print(event.x, event.y)
+    for room in rooms:
+        if not room.visited:
+            continue
+        # print(room.name, room.bubble_bounds)
+        if event.x > room.bubble_bounds[0] and event.x < room.bubble_bounds[2]:
+            # print("matched horizonal")
+            if event.y > room.bubble_bounds[1] and event.y < room.bubble_bounds[3]:
+                # print("matched vertical")
+                current_map_room = room
+                map_canvas.delete(ALL)
+                display_map()
+
+
+def make_map_window():
+    global map_window, map_canvas, current_map_room
+    map_window = Tk()
+    map_window.geometry("1500x1000")
+    map_window.title("Map")
+    map_canvas = Canvas(map_window, bg=DARK_GRAY, width=1490, height=950)
+    map_canvas.pack(fill=BOTH)
+    map_canvas.bind("<Button>", map_clicked)
+    current_map_room = current_room
+    display_map()
+    map_window.mainloop()
+
+
+def display_map():
+    global map_canvas, factor, offset_x, offset_y, recurse_depth
+    if not current_map_room:
+        return
+    recurse_depth = 0
+    reset_all_room_coordinates(current_map_room)
+    factor = 12.0  # zoom scale
+    # offsets move starting point of map to centre of canvas
+    offset_x = 750
+    offset_y = 500
+    draw_rooms()
+    draw_paths()
+
+
+def get_closest_connection(connects: list, x: float, y: float, use_alternates: bool = False):
+    min_dist = 1000000
+    standard_connects = connects[0:8]
+    alt_connects = connects[8:]
+    chosen_point = standard_connects[0]
+    saved_index = 0
+    for index in range(0,8):
+        x1, y1 = standard_connects[index]
+        dist = math.sqrt( (x - x1)**2 + (y - y1)**2 )
+        if dist < min_dist:
+            min_dist = dist
+            chosen_point = standard_connects[index]
+            saved_index = index
+
+    if not use_alternates:
+        return chosen_point
+    else:
+        return alt_connects[saved_index]
+
+def return_path_exists(current_path: Path) -> bool:
+    for path in paths:
+        if path == current_path:
+            continue  # don't test ourselves!
+        if not path.drawn:
+            continue  # only interested in paths we've already drawn
+        if current_path.to_room == path.from_room:
+            if current_path.from_room == path.to_room:
+                return True
+    return False
+
+
+def draw_paths():
+    global map_canvas
+    for path in paths:
+        path.drawn = False
+    for path in paths:
+        if (not path.from_room.visited) or (not path.to_room.visited):
+            continue  # only want to draw paths for nearby rooms, "visited" flag is set in repositioning proces
+        # from room
+        from_x, from_y = factored_point((path.from_room.xpos, path.from_room.ypos))
+        # to room
+        to_x, to_y = factored_point((path.to_room.xpos, path.to_room.ypos))
+
+        alternate = return_path_exists(path)
+
+        start_connect = get_closest_connection(path.to_room.connection_points(), from_x, from_y, alternate)  # connect points already factored
+        end_connect = get_closest_connection(path.from_room.connection_points(), to_x, to_y, alternate)  # connect points already factored
+        start_x, start_y = start_connect
+        end_x, end_y = end_connect
+
+        if path.direction.id >= 9 and path.direction.id <= 12:  # up, down, enter, leave - draw dashed line
+            map_canvas.create_line(start_x, start_y, end_x, end_y, arrow=FIRST, dash=(3,2))
+        else:
+            map_canvas.create_line(start_x, start_y, end_x, end_y, arrow=FIRST)
+        path.drawn = True
+
+
+def draw_rooms():
+    global map_canvas
+    for room in rooms:   
+        if (room.visited):
+            x, y = factored_point((room.xpos, room.ypos))
+            # create text so we can measure it
+            myText = map_canvas.create_text(x, y, anchor=CENTER, justify=CENTER,text=room.name, tags="roomtext")
+            bounds = map_canvas.bbox(myText)
+            map_canvas.create_oval(bounds[0] - 10, bounds[1] - 10, bounds[2] + 10, bounds[3] + 10, fill="white")
+            room.bubble_bounds = (bounds[0] - 10, bounds[1] - 10, bounds[2] + 10, bounds[3] + 10)
+            # now write text again
+            map_canvas.delete(myText)
+            myText = map_canvas.create_text(x, y, anchor=CENTER, justify=CENTER,text=room.name, tags="roomtext")
+
+
 
 draw_menu(window)
 draw_controls(window)
+if db_path:  # passed as argument
+    open_existing(from_args=True)
 
 window.mainloop()
