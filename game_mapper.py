@@ -4,7 +4,7 @@ import os
 import sys
 import math
 from typing import List, Tuple
-from enum import Enum
+from random import randint
 from tkinter import *
 from tkinter import ttk
 from tkinter import filedialog as fd
@@ -20,13 +20,15 @@ class Direction():
     y = 0.0
     z = 0.0
     invert_id = 0
-    def __init__(self, id: int, name: str, x: float, y: float, z: float, invert: int):
+    colour = '#000000'
+    def __init__(self, id: int, name: str, x: float, y: float, z: float, invert: int, colour: str = "#000000"):
         self.id = id
         self.name = name
         self.x = x
         self.y = y
         self.z = z
         self.invert_id = invert
+        self.colour = colour
 
 
 class Room():
@@ -37,6 +39,7 @@ class Room():
     ypos = 0.0
     zpos = 0.0
     visited = False  # temporary flag
+    deadend = False  # temporary flag
     bubble_bounds = (0,0,0,0)
     def __init__(self, id: int, name: str, desc: str = ""):
         self.id = id
@@ -200,9 +203,6 @@ def load_data(path_to_db: str):
         name = row[1]
         aroom = Room(id, name)
         aroom.description = row[2]
-        aroom.xpos = row[3]
-        aroom.ypos = row[4]
-        aroom.zpos = row[5]
         rooms.append(aroom)
     sql = "SELECT * FROM DIRECTIONS "
     cursor.execute(sql)
@@ -214,7 +214,8 @@ def load_data(path_to_db: str):
         y = row[3]
         z = row[4]
         invert = row[5]
-        direction = Direction(id, name, x, y, z, invert)
+        colour = row[6]
+        direction = Direction(id, name, x, y, z, invert, colour)
         directions.append(direction)
     sql = "SELECT * FROM PATHS "
     cursor.execute(sql)
@@ -271,6 +272,10 @@ def draw_menu(window: Tk):
     filemenu.add_separator()
     filemenu.add_command(label="Exit", command=window.quit)
     menubar.add_cascade(label="File", menu=filemenu)
+    toolmenu = Menu(menubar, tearoff=0)
+    toolmenu.add_command(label="Show Map", command=make_map_window)
+    toolmenu.add_command(label="Generate Navigation", command=show_textpath_window)
+    menubar.add_cascade(label="Tools", menu=toolmenu)
 
     helpmenu = Menu(menubar, tearoff=0)
     helpmenu.add_command(label="Help Index", command=do_nothing)
@@ -355,7 +360,7 @@ def get_outward_paths(room_id: int) -> list:
 def get_unvisited_paths(room_id: int) -> list:
     path_list = []
     for path in paths:
-        if path.from_room.id == room_id and not path.to_room.visited:
+        if path.from_room.id == room_id and not path.to_room.visited and not path.to_room.deadend:
             path_list.append(path)
     return path_list
 
@@ -469,6 +474,9 @@ def set_room_coordinates(path: Path, outward: bool = True):
         to_room.xpos = from_room.xpos + direction.x * 10
         to_room.ypos = from_room.ypos + direction.y * 10
         to_room.zpos = from_room.zpos + direction.z * 5
+        while get_distance_to_nearest(to_room) < 10.0:               
+            to_room.xpos = to_room.xpos + direction.x * 2 + 0.5  # if we're too close move it
+            to_room.ypos = to_room.ypos + direction.y * 2 + 0.5  # if we're too close move it
     else:
         if from_room.visited:
             return
@@ -477,8 +485,8 @@ def set_room_coordinates(path: Path, outward: bool = True):
         from_room.ypos = to_room.ypos + inverse.y * 10
         from_room.zpos = to_room.zpos + inverse.z * 5
 
-    sql=f'UPDATE ROOMS SET X = {to_room.xpos}, Y = {to_room.ypos}, Z = {to_room.zpos} WHERE ID = {to_room.id}'
-    db_execute(sql)
+    #sql=f'UPDATE ROOMS SET X = {to_room.xpos}, Y = {to_room.ypos}, Z = {to_room.zpos} WHERE ID = {to_room.id}'
+    #db_execute(sql)
 
 
 def get_distance_to_nearest(this_room) -> float:
@@ -521,8 +529,6 @@ def reset_all_room_coordinates(starting_room: Room):
         room.set_position(0.0, 0.0, 0.0)  
         room.bubble_bounds = (0,0,0,0)
         room.visited = False
-    sql=f'UPDATE ROOMS SET X = 0.0, Y = 0.0, Z = 0.0'
-    db_execute(sql)
 
     starting_room.visited = True
     reset_room_coordinates(starting_room)
@@ -606,8 +612,8 @@ def go_to_room(room_id):
     new_path_pane.pack(side=TOP, pady=5)
     draw_new_path_controls(room_id)
 
-    navig_button = Button(window, text="Get Navigation Commands", command=show_textpath_window)
-    navig_button.pack(side=TOP, pady=5)
+    # navig_button = Button(window, text="Get Navigation Commands", command=show_textpath_window, tags="navbutton")
+    # navig_button.pack(side=TOP, pady=5)
 
 def delete_path(path: Path, path_pane: Frame):
     sql = f'DELETE FROM PATHS WHERE DIRECTIONID = {path.direction.id} AND FROMID = {path.from_room.id} AND TOID = {path.to_room.id}'
@@ -642,20 +648,60 @@ def factored_point(point: Tuple[float, float]) -> Tuple[float, float]:
     return (x_factored, y_factored)
 
 
-def map_clicked(event):
-    global current_map_room, map_canvas
-    # print(event.x, event.y)
+def get_room_at_position(x: int, y: int) -> Room:
     for room in rooms:
         if not room.visited:
             continue
         # print(room.name, room.bubble_bounds)
-        if event.x > room.bubble_bounds[0] and event.x < room.bubble_bounds[2]:
+        if x > room.bubble_bounds[0] and x < room.bubble_bounds[2]:
             # print("matched horizonal")
-            if event.y > room.bubble_bounds[1] and event.y < room.bubble_bounds[3]:
+            if y > room.bubble_bounds[1] and y < room.bubble_bounds[3]:
                 # print("matched vertical")
-                current_map_room = room
-                map_canvas.delete(ALL)
-                display_map()
+                return room
+    return None
+
+
+def we_overlap(this_room:Room, x: int, y:int) -> bool:
+    for room in rooms:
+        if not room.visited or this_room == room:
+            continue
+        if x > room.bubble_bounds[0] and x < room.bubble_bounds[2]:
+            # print("matched horizonal")
+            if y > room.bubble_bounds[1] and y < room.bubble_bounds[3]:
+                # print("matched vertical")
+                return True
+    return False
+
+
+def map_clicked(event):
+    global current_map_room, map_canvas
+    # print(event.x, event.y)
+    room = get_room_at_position(event.x, event.y)
+    if room:
+        current_map_room = room
+        map_canvas.delete(ALL)
+        display_map()
+        return
+
+
+def draw_legend(canvas: Canvas):
+    # draw compass
+    canvas.create_text(40, 20, text="LEGEND", anchor=W)
+    canvas.create_text(40, 50, text="North-South: ", anchor=W)
+    canvas.create_text(40, 70, text="East-West: ", anchor=W)
+    canvas.create_text(40, 90, text="N.West-S.East: ", anchor=W)
+    canvas.create_text(40, 110, text="N.East-S.West: ", anchor=W)
+    canvas.create_text(40, 130, text="Up-Down: ", anchor=W)
+    canvas.create_text(40, 150, text="Enter-Leave: ", anchor=W)
+    canvas.create_text(40, 170, text="Special/Magic: ", anchor=W)
+
+    canvas.create_line(150,50,250,50,fill=directions[0].colour, width=2)
+    canvas.create_line(150,70,250,70,fill=directions[2].colour, width=2)
+    canvas.create_line(150,90,250,90,fill=directions[7].colour, width=2)
+    canvas.create_line(150,110,250,110,fill=directions[1].colour, width=2)
+    canvas.create_line(150,130,250,130,fill=directions[8].colour, width=2)
+    canvas.create_line(150,150,250,150,fill=directions[10].colour, width=2)
+    canvas.create_line(150,170,250,170,fill=directions[16].colour, width=2)
 
 
 def make_map_window():
@@ -663,7 +709,8 @@ def make_map_window():
     map_window = Tk()
     map_window.geometry("1500x1000")
     map_window.title("Map")
-    map_canvas = Canvas(map_window, bg=DARK_GRAY, width=1490, height=950)
+    map_canvas = Canvas(map_window, bg='#EEEEEE', width=1490, height=950)
+    draw_legend(map_canvas)
     map_canvas.pack(fill=BOTH)
     map_canvas.bind("<Button>", map_clicked)
     current_map_room = current_room
@@ -681,8 +728,10 @@ def display_map():
     # offsets move starting point of map to centre of canvas
     offset_x = 750
     offset_y = 500
-    draw_rooms()
+    draw_rooms(False) # do this here to get bounds
     draw_paths()
+    draw_rooms(True) # do this here to overlay paths
+    draw_legend(map_canvas)
 
 
 def get_closest_connection(connects: list, x: float, y: float, use_alternates: bool = False):
@@ -736,13 +785,13 @@ def draw_paths():
         end_x, end_y = end_connect
 
         if path.direction.id >= 9 and path.direction.id <= 12:  # up, down, enter, leave - draw dashed line
-            map_canvas.create_line(start_x, start_y, end_x, end_y, arrow=FIRST, dash=(3,2))
+            map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, dash=(3,2), width=2)
         else:
-            map_canvas.create_line(start_x, start_y, end_x, end_y, arrow=FIRST)
+            map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, width=2)
         path.drawn = True
 
 
-def draw_rooms():
+def draw_rooms(do_draw: bool = False):
     global map_canvas
     for room in rooms:   
         if (room.visited):
@@ -750,12 +799,136 @@ def draw_rooms():
             # create text so we can measure it
             myText = map_canvas.create_text(x, y, anchor=CENTER, justify=CENTER,text=room.name, tags="roomtext")
             bounds = map_canvas.bbox(myText)
-            map_canvas.create_oval(bounds[0] - 10, bounds[1] - 10, bounds[2] + 10, bounds[3] + 10, fill="white")
-            room.bubble_bounds = (bounds[0] - 10, bounds[1] - 10, bounds[2] + 10, bounds[3] + 10)
+            if do_draw:
+                map_canvas.create_oval(bounds[0] - 10, bounds[1] - 20, bounds[2] + 10, bounds[3] + 20, fill="white")
+            room.bubble_bounds = (bounds[0] - 10, bounds[1] - 20, bounds[2] + 10, bounds[3] + 20)
             # now write text again
             map_canvas.delete(myText)
-            myText = map_canvas.create_text(x, y, anchor=CENTER, justify=CENTER,text=room.name, tags="roomtext")
+            if do_draw:
+               myText = map_canvas.create_text(x, y, anchor=CENTER, justify=CENTER,text=room.name, tags="roomtext")
 
+
+results_text: scrolledtext.ScrolledText = None
+nav_stack: List[Path] = []
+solutions = []
+
+def search_outward(from_id: int, wanted_id: int):
+    global nav_stack, search_success, rooms
+    out_paths = get_unvisited_paths(from_id)  # also rejects deadend rooms
+    if not out_paths:  # we've reached a deadend, mark it as such
+        from_room = get_room_from_id(from_id)
+        from_room.deadend = True
+        print("reached dead end")
+        nav_stack.pop()
+        return
+        
+    # pick one path at random
+    if len(out_paths) <= 1:
+        path = out_paths[0]
+    else:
+        index = randint(0, len(out_paths)-1)
+        path = out_paths[index]
+    nav_stack.append(path)
+    print(f"checking {path.from_room.name} -> {path.to_room.name}")
+    
+    if path.to_room.id == wanted_id:
+        print("found!")
+        search_success = True
+        return
+    else:
+        path.to_room.visited = True
+        search_outward(path.to_room.id, wanted_id) # recursive!!
+        
+
+def reveal_solution(solution: list):
+    nav_str = ""
+    for found_path in solution:
+        nav_str += f"{found_path.direction.name} to {found_path.to_room.name}\n"
+    results_text.delete("1.0", END)
+    results_text.insert(END, nav_str)
+
+
+def generate_navigation(from_room_str: str, to_room_str: str):
+    global search_success, nav_stack
+    
+    match = regex.search(r"^(\d+):", from_room_str)
+    if match:
+        from_id = int(match.group(1))
+    else:
+        return
+    match = regex.search(r"^(\d+):", to_room_str)
+    if match:
+       to_id = int(match.group(1))
+    else:
+        return
+    from_room = get_room_from_id(from_id)
+    
+    solutions = []
+    
+    for room in rooms:
+        room.deadend = False
+    
+    # loop through this lots of times (random walks)
+    for _ in range(0, 20):
+        nav_stack = []
+        for room in rooms:
+            room.visited = False
+        from_room.visited = True
+        search_success = False
+        search_outward(from_id, to_id)
+        if search_success:
+            temp = [] # need to COPY values
+            for path in nav_stack:
+                temp.append(path)
+            solutions.append(temp) 
+        
+    
+    if solutions:
+        # find shortest one
+        best = solutions[0]
+        shortest = 10000
+        for solution in solutions:
+            if len(solution) < shortest:
+                shortest = len(solution)
+                best = solution
+        reveal_solution(best)
+    else:
+        results_text.delete("1.0", END)
+        results_text.insert(END, "No path exists")
+
+
+def show_textpath_window():
+    global results_text
+    text_window = Tk()
+    text_window.geometry("700x250+250+250")
+    text_window.title("Get navigation commands")
+    text_window.config(bg=LIGHT_GRAY)
+
+    from_str = StringVar()
+    to_str = StringVar()
+
+    combo_panel = Frame(text_window, bg=LIGHT_GRAY)
+    from_label = Label(combo_panel, text="From Room:", bg=LIGHT_GRAY)
+    from_label.pack(side=LEFT, padx=5)
+    from_combo = ttk.Combobox(combo_panel, width=20, textvariable=from_str)
+    from_combo.pack(side=LEFT, padx=5)
+    from_combo.config(values=room_names_no_new())
+    from_combo.current(0)
+    to_label = Label(combo_panel, text="From Room:", bg=LIGHT_GRAY)
+    to_label.pack(side=LEFT, padx=5)
+    to_combo = ttk.Combobox(combo_panel, width=20, textvariable=to_str)
+    to_combo.config(values=room_names_no_new())
+    to_combo.pack(side=LEFT, padx=5)
+    to_combo.current(0)
+    combo_panel.pack(side=TOP, fill=X, pady=5)
+    get_text_but = Button(text_window, text="Get Commands", command=lambda: generate_navigation(from_combo.get(), to_combo.get()))
+    get_text_but.pack(side=TOP, pady=5)
+
+    results_text = scrolledtext.ScrolledText(text_window, width=40, height=10)
+
+    # results_text = Text(text_window, width=60, height=5)
+    results_text.pack(side=TOP, pady=5)
+    text_window.mainloop()
 
 
 draw_menu(window)
