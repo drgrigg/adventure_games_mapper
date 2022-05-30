@@ -130,6 +130,7 @@ def direction_names() -> list:
 LIGHT_GRAY = "#BBBBBB"
 DARK_GRAY = "#808080"
 BLACK = "#000000"
+CREAM = "#F8EECB"
 
 window = Tk()
 window.geometry("1000x800+200+200")
@@ -813,7 +814,10 @@ def draw_rooms(do_draw: bool = False):
             myText = map_canvas.create_text(x, y, anchor=CENTER, justify=CENTER,text=room.name, tags="roomtext")
             bounds = map_canvas.bbox(myText)
             if do_draw:
-                map_canvas.create_oval(bounds[0] - 10, bounds[1] - 20, bounds[2] + 10, bounds[3] + 20, fill="white")
+                if not room.id == current_map_room.id:
+                    map_canvas.create_oval(bounds[0] - 10, bounds[1] - 20, bounds[2] + 10, bounds[3] + 20, fill="white")
+                else: # "You are here"
+                    map_canvas.create_oval(bounds[0] - 10, bounds[1] - 20, bounds[2] + 10, bounds[3] + 20, fill=CREAM, outline="red", width=2)
             room.bubble_bounds = (bounds[0] - 10, bounds[1] - 20, bounds[2] + 10, bounds[3] + 20)
             # now write text again
             map_canvas.delete(myText)
