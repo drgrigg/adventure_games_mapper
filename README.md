@@ -1,5 +1,7 @@
-# adventure_games_mapper
-Python code for mapping text adventure games.
+# Adventure Game Mapper
+## Python code for mapping text adventure games.
+
+**Note:** This is still a work in progress. 
 
 This arose because I discovered that archive.org has many old text adventure games, including those from Infocom (such as the Zork series, Planetfall, etc).
 
@@ -11,4 +13,4 @@ The mapping is a little clumsy because the connections in such games can be quit
 
 There's also an experimental feature to find the shortest path between two rooms.
 
-This is still a work in progress. Warning! There are spoilers in the sample zork2 database included here.
+Warning! There are game spoilers in the sample zork2 database included here.
