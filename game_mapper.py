@@ -127,7 +127,7 @@ def direction_names() -> list:
     return ret_list
 
 
-LIGHT_GRAY = "#A0A0A0"
+LIGHT_GRAY = "#BBBBBB"
 DARK_GRAY = "#808080"
 BLACK = "#000000"
 
@@ -135,6 +135,7 @@ window = Tk()
 window.geometry("1000x800+200+200")
 window.title("Adventure Game Mapper")
 window.config(bg=LIGHT_GRAY)
+
 
 current_room: Room = None
 db_lab: Label = None
@@ -147,6 +148,7 @@ data_pane: Frame = None
 direction_var = StringVar()
 room_var = StringVar()
 room_var_2 = StringVar()
+search_combo: ttk.Combobox = None
 
 
 def create_new_db(path_to_db: str):
@@ -274,7 +276,8 @@ def draw_menu(window: Tk):
     menubar.add_cascade(label="File", menu=filemenu)
     toolmenu = Menu(menubar, tearoff=0)
     toolmenu.add_command(label="Show Map", command=make_map_window)
-    toolmenu.add_command(label="Generate Navigation", command=show_textpath_window)
+    toolmenu.add_command(label="Generate Navigation", command=show_navigation_window)
+    toolmenu.add_command(label="Search Rooms", command=show_search_window)
     menubar.add_cascade(label="Tools", menu=toolmenu)
 
     helpmenu = Menu(menubar, tearoff=0)
@@ -302,10 +305,10 @@ def draw_controls(window: Tk):
     db_lab = Label(window, text="Game file: none selected", bg=LIGHT_GRAY)
     db_lab.pack(side=TOP, pady=5, fill=X)
 
-    data_pane = Frame(window, bg=LIGHT_GRAY, height=600, highlightbackground=DARK_GRAY, highlightthickness=1)
+    data_pane = Frame(window, bg=LIGHT_GRAY, height=600)
     
-    room_pane = Frame(data_pane, bg=LIGHT_GRAY, height=500, highlightbackground=DARK_GRAY, highlightthickness=1)
-    entry_pane = Frame(room_pane, bg=LIGHT_GRAY, highlightbackground=DARK_GRAY, highlightthickness=1)
+    room_pane = Frame(data_pane, bg=LIGHT_GRAY, height=500)
+    entry_pane = Frame(room_pane, bg=LIGHT_GRAY)
     name_lab = Label(entry_pane, text="Room:", bg=LIGHT_GRAY)
     name_lab.pack(side=LEFT, padx=5)
     name_entry = Entry(entry_pane, width=25)
@@ -321,7 +324,7 @@ def draw_controls(window: Tk):
     room_pane.pack(side=LEFT, padx=5)
 
     # we'll fill this with buttons representing the directions we can go
-    button_pane = Frame(data_pane, bg=LIGHT_GRAY, height=500, highlightbackground=DARK_GRAY, highlightthickness=1)
+    button_pane = Frame(data_pane, bg=LIGHT_GRAY, height=500)
     button_pane.pack(side=LEFT, padx=5)
     data_pane.pack(side=TOP, padx=5, fill=X)
 
@@ -539,7 +542,7 @@ def draw_new_path_controls(room_id: id):
     if new_path_pane:
         label0 = Label(new_path_pane, text="Add new path or room", bg=LIGHT_GRAY)
         label0.pack(side=TOP, pady=5)
-        inside_pane = Frame(new_path_pane, bg=LIGHT_GRAY, height=100, highlightbackground=DARK_GRAY, highlightthickness=1)
+        inside_pane = Frame(new_path_pane, bg=LIGHT_GRAY, height=100)
         inside_pane.pack(side=TOP, pady=5)
         label1 = Label(inside_pane, text="Direction: ", bg=LIGHT_GRAY)
         label1.pack(side=LEFT, padx=5)
@@ -559,7 +562,7 @@ def draw_new_path_controls(room_id: id):
         button3.pack(side=LEFT, padx=5, fill=X)
         new_room_but = Button(new_path_pane, text="Create Unconnected Room", command=add_unconnected_room)
         new_room_but.pack(side=TOP, padx=5)
-        map_but = Button(new_path_pane, text="Show Map", command=make_map_window)
+        map_but = Button(new_path_pane, text="Show Map", width=30, command=make_map_window)
         map_but.pack(side=TOP, pady=5)
 
 def go_to_room_from_combo(event):
@@ -570,6 +573,16 @@ def go_to_room_from_combo(event):
        go_to_room(to_id)
     else:
         return
+
+
+def go_to_room_from_string(roomstr: str):
+    match = regex.search(r"^(\d+):", roomstr)
+    if match:
+       to_id = int(match.group(1))
+       go_to_room(to_id)
+    else:
+        return
+
 
 def go_to_room(room_id):
     global window, button_pane, new_path_pane, data_pane, current_room, room_var_2, name_lab, name_entry
@@ -589,7 +602,7 @@ def go_to_room(room_id):
         return
     if button_pane:
         button_pane.destroy()
-    button_pane = Frame(data_pane, bg=LIGHT_GRAY, height=500, highlightbackground=DARK_GRAY, highlightthickness=1)
+    button_pane = Frame(data_pane, bg=LIGHT_GRAY, height=500)
     button_pane.pack(side=LEFT, padx=5)
     other_rooms_pane = Frame(button_pane, bg=LIGHT_GRAY)
     other_rooms_lab = Label(other_rooms_pane, text="Go direct to:", bg=LIGHT_GRAY)
@@ -609,7 +622,7 @@ def go_to_room(room_id):
     if new_path_pane:
         new_path_pane.destroy()
     new_path_pane = Frame(window, bg=LIGHT_GRAY, height=200, highlightbackground=DARK_GRAY, highlightthickness=1)
-    new_path_pane.pack(side=TOP, pady=5)
+    new_path_pane.pack(side=TOP, pady=5, fill=X)
     draw_new_path_controls(room_id)
 
     # navig_button = Button(window, text="Get Navigation Commands", command=show_textpath_window, tags="navbutton")
@@ -624,8 +637,8 @@ def delete_path(path: Path, path_pane: Frame):
 
 def place_buttons(path):
     global button_pane
-    path_pane = Frame(button_pane, bg=LIGHT_GRAY, highlightbackground=DARK_GRAY, highlightthickness=1)
-    label = Label(path_pane, bg=LIGHT_GRAY, text=f"{path.direction.id}: {path.direction.name}: ")
+    path_pane = Frame(button_pane, bg=LIGHT_GRAY)
+    label = Label(path_pane, bg=LIGHT_GRAY, text=f"{path.direction.name}: ")
     label.pack(side=LEFT, padx=5)
     go_button = Button(path_pane, text=f"{path.to_room.id}: {path.to_room.name}", relief=RAISED, command=lambda: go_to_room(path.to_room.id))
     go_button.pack(side=LEFT, padx=5)
@@ -897,7 +910,54 @@ def generate_navigation(from_room_str: str, to_room_str: str):
         results_text.insert(END, "No path exists")
 
 
-def show_textpath_window():
+def search_for(searchtext: str):
+    global search_combo
+    lcsearch = searchtext.lower()
+    found_list = []
+    for room in rooms:
+        lcname = room.name.lower()
+        lcdesc = room.description.lower()
+        if lcsearch in lcname or lcsearch in lcdesc:
+            found_list.append(f"{room.id}: {room.name}")
+    if found_list:
+        search_combo.delete(0, END)
+        search_combo.config(values=found_list)
+        search_combo.current(0)
+
+
+def show_search_window():
+    global search_combo, room_var_2
+    search_win = Tk()
+    search_win.geometry("500x150+250+250")
+    search_win.title("Search for text in rooms")
+    search_win.config(bg=LIGHT_GRAY)
+
+    searchtext = StringVar()
+    # found_room = StringVar(search_win)
+
+    pane = Frame(search_win, bg=LIGHT_GRAY)
+    pane.pack(side=TOP, fill=X)
+    label = Label(pane, text="Search for: ", bg=LIGHT_GRAY)
+    label.pack(side=LEFT, padx=5)
+    search_entry = Entry(pane, width=25, textvariable=searchtext)
+    search_entry.pack(side=LEFT, padx=5)
+    button = Button(pane, text="Search", command=lambda: search_for(search_entry.get()))
+    button.pack(side=LEFT, padx=5)
+    label2 = Label(search_win, text="Rooms found will appear here. Select one to go there.", bg=LIGHT_GRAY)
+    label2.pack(side=TOP, pady=5)
+    search_pane = Frame(search_win, bg=LIGHT_GRAY)
+    search_combo = ttk.Combobox(search_pane, width=20, textvariable=room_var_2)
+    search_combo.config(values= ["0: Nowhere"])
+    search_combo.current(0)
+    search_combo.bind('<<ComboboxSelected>>', go_to_room_from_combo)
+    search_combo.pack(side=LEFT, padx=5)
+    go_button = Button(search_pane, text="Go", command=lambda: go_to_room_from_string(search_combo.get()))
+    go_button.pack(side=LEFT, padx=5)
+    search_pane.pack(side=TOP, pady=5)
+    search_win.mainloop()
+
+
+def show_navigation_window():
     global results_text
     text_window = Tk()
     text_window.geometry("700x250+250+250")
