@@ -44,6 +44,14 @@ class Room():
     def __init__(self, id: int, name: str, desc: str = ""):
         self.id = id
         self.name = name
+    def __lt__(self, other) -> bool:
+        if self.name == other.name:
+            if self.id < other.id:
+                return True
+        else:
+            if self.name < other.name:
+                return True
+        return False     
     def set_position(self, x, y, z):
         self.xpos = x
         self.ypos = y
@@ -107,23 +115,23 @@ paths: List[Path] = []
 # combos: List[ttk.Combobox] = []
 
 def room_names() -> list:
-    ret_list = ["0: NEW ROOM"]
-    for room in rooms:
-        ret_list.append(f"{room.id}: {room.name}")
+    ret_list = ["NEW ROOM : 0"]
+    for room in sorted(rooms):
+        ret_list.append(f"{room.name} : {room.id}")
     return ret_list
 
 
 def room_names_no_new() -> list:
-    ret_list = ["0: Nowhere"]
-    for room in rooms:
-        ret_list.append(f"{room.id}: {room.name}")
+    ret_list = ["Nowhere : 0"]
+    for room in sorted(rooms):
+        ret_list.append(f"{room.name} : {room.id}")
     return ret_list
 
 
 def direction_names() -> list:
     ret_list = ["None"]
     for direction in directions:
-        ret_list.append(f"{direction.id}: {direction.name}")
+        ret_list.append(f"{direction.name} : {direction.id}")
     return ret_list
 
 
@@ -133,7 +141,7 @@ BLACK = "#000000"
 CREAM = "#F8EECB"
 
 window = Tk()
-window.geometry("1000x800+200+200")
+window.geometry("960x500+200+200")
 window.title("Adventure Game Mapper")
 window.config(bg=LIGHT_GRAY)
 
@@ -145,6 +153,7 @@ name_entry: Entry = None
 desc_text: Text = None
 button_pane: Frame = None
 new_path_pane: Frame = None
+search_pane : Frame = None
 data_pane: Frame = None
 direction_var = StringVar()
 room_var = StringVar()
@@ -301,7 +310,7 @@ def update_room_details():
 
 
 def draw_controls(window: Tk):
-    global db_lab, name_lab, name_entry, desc_text, button_pane, new_path_pane, data_pane
+    global db_lab, name_lab, name_entry, desc_text, button_pane, new_path_pane, data_pane, search_pane
 
     db_lab = Label(window, text="Game file: none selected", bg=LIGHT_GRAY)
     db_lab.pack(side=TOP, pady=5, fill=X)
@@ -330,7 +339,7 @@ def draw_controls(window: Tk):
     data_pane.pack(side=TOP, padx=5, fill=X)
 
     new_path_pane = Frame(window, bg=LIGHT_GRAY, height=200, highlightbackground=DARK_GRAY, highlightthickness=1)
-    new_path_pane.pack(side=TOP, pady=5)
+    new_path_pane.pack(side=TOP, fill=X, pady=5)
     draw_new_path_controls(1)
 
 
@@ -407,12 +416,12 @@ def add_unconnected_room():
 def add_path_to_room(from_id: int, direct_str: str, room_str: str, mutual: bool = False):
     direct_id = 0
     to_id = 0
-    match = regex.search(r"^(\d+):", direct_str)
+    match = regex.search(r": (\d+)$", direct_str)
     if match:
         direct_id = int(match.group(1))
     else:
         return
-    match = regex.search(r"^(\d+):", room_str)
+    match = regex.search(r": (\d+)$", room_str)
     if match:
        to_id = int(match.group(1))
     else:
@@ -568,7 +577,7 @@ def draw_new_path_controls(room_id: id):
 
 def go_to_room_from_combo(event):
     room_str = room_var_2.get()
-    match = regex.search(r"^(\d+):", room_str)
+    match = regex.search(r": (\d+)$", room_str)
     if match:
        to_id = int(match.group(1))
        go_to_room(to_id)
@@ -576,8 +585,22 @@ def go_to_room_from_combo(event):
         return
 
 
+def set_combo_to_room_id(combo: ttk.Combobox, room_id: int):
+    values = room_names_no_new()
+    room = get_room_from_id(room_id)
+    if room:
+        wanted = values.index(f"{room.name} : {room.id}")
+        if wanted >= 0:
+            combo.current(wanted)
+
+
+def set_combo_to_current_room(combo: ttk.Combobox):
+    if current_room:
+        set_combo_to_room_id(combo, current_room.id)
+
+
 def go_to_room_from_string(roomstr: str):
-    match = regex.search(r"^(\d+):", roomstr)
+    match = regex.search(r": (\d+)$", roomstr)
     if match:
        to_id = int(match.group(1))
        go_to_room(to_id)
@@ -639,13 +662,17 @@ def delete_path(path: Path, path_pane: Frame):
 def place_buttons(path):
     global button_pane
     path_pane = Frame(button_pane, bg=LIGHT_GRAY)
-    label = Label(path_pane, bg=LIGHT_GRAY, text=f"{path.direction.name}: ")
-    label.pack(side=LEFT, padx=5)
-    go_button = Button(path_pane, text=f"{path.to_room.id}: {path.to_room.name}", relief=RAISED, command=lambda: go_to_room(path.to_room.id))
-    go_button.pack(side=LEFT, padx=5)
+
     delete_button = Button(path_pane, text="X", relief=RAISED, command=lambda: delete_path(path, path_pane))
-    delete_button.pack(side=LEFT, padx=5)
-    path_pane.pack(side=TOP, pady=5)
+    delete_button.pack(side=RIGHT, padx=5)
+
+    go_button = Button(path_pane, text=f"{path.to_room.name}", relief=RAISED, command=lambda: go_to_room(path.to_room.id))
+    go_button.pack(side=RIGHT, padx=5)
+ 
+    label = Label(path_pane, bg=LIGHT_GRAY, text=f"{path.direction.name}: ")
+    label.pack(side=RIGHT, padx=5)
+
+    path_pane.pack(side=TOP, fill=X, pady=5)
         
 
 map_window: Tk = None
@@ -713,9 +740,9 @@ def draw_legend(canvas: Canvas):
     canvas.create_line(150,70,250,70,fill=directions[2].colour, width=2)
     canvas.create_line(150,90,250,90,fill=directions[7].colour, width=2)
     canvas.create_line(150,110,250,110,fill=directions[1].colour, width=2)
-    canvas.create_line(150,130,250,130,fill=directions[8].colour, width=2)
-    canvas.create_line(150,150,250,150,fill=directions[10].colour, width=2)
-    canvas.create_line(150,170,250,170,fill=directions[16].colour, width=2)
+    canvas.create_line(150,130,250,130,fill=directions[8].colour, width=2, dash=(3,2))
+    canvas.create_line(150,150,250,150,fill=directions[10].colour, width=2, dash=(4,3))
+    canvas.create_line(150,170,250,170,fill=directions[16].colour, width=3, dash=(1,2))
 
 
 def make_map_window():
@@ -798,8 +825,12 @@ def draw_paths():
         start_x, start_y = start_connect
         end_x, end_y = end_connect
 
-        if path.direction.id >= 9 and path.direction.id <= 12:  # up, down, enter, leave - draw dashed line
+        if path.direction.id >= 9 and path.direction.id <= 10:  # up, down - draw dashed line
             map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, dash=(3,2), width=2)
+        elif path.direction.id >= 11 and path.direction.id <= 12:  # enter, exit - draw dashed line
+            map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, dash=(4,3), width=2)
+        elif path.direction.id == 17:  # magic - draw dotted line
+            map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, dash=(1,2), width=3)
         else:
             map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, width=2)
         path.drawn = True
@@ -868,12 +899,12 @@ def reveal_solution(solution: list):
 def generate_navigation(from_room_str: str, to_room_str: str):
     global search_success, nav_stack
     
-    match = regex.search(r"^(\d+):", from_room_str)
+    match = regex.search(r": (\d+)$", from_room_str)
     if match:
         from_id = int(match.group(1))
     else:
         return
-    match = regex.search(r"^(\d+):", to_room_str)
+    match = regex.search(r": (\d+)$", to_room_str)
     if match:
        to_id = int(match.group(1))
     else:
@@ -898,7 +929,23 @@ def generate_navigation(from_room_str: str, to_room_str: str):
             for path in nav_stack:
                 temp.append(path)
             solutions.append(temp) 
-        
+    
+    for room in rooms:
+        room.deadend = False
+
+    # now go through list of rooms in reverse order
+    for _ in range(0, 20):
+        nav_stack = []
+        for room in reversed(rooms):
+            room.visited = False
+        from_room.visited = True
+        search_success = False
+        search_outward(from_id, to_id)
+        if search_success:
+            temp = [] # need to COPY values
+            for path in nav_stack:
+                temp.append(path)
+            solutions.append(temp) 
     
     if solutions:
         # find shortest one
@@ -961,6 +1008,25 @@ def show_search_window():
     search_win.mainloop()
 
 
+def swap_rooms_in_combos(combo1: ttk.Combobox, combo2: ttk.Combobox):
+    room_str_1 = combo1.get()
+    room_str_2 = combo2.get()
+    r1_id = get_id_from_string(room_str_1)
+    r2_id = get_id_from_string(room_str_2)
+    if r1_id >= 0 and r2_id >= 0:
+        set_combo_to_room_id(combo2, r1_id)
+        set_combo_to_room_id(combo1, r2_id)
+
+
+def get_id_from_string(idstr: str) -> int:
+    match = regex.search(r": (\d+)$", idstr)
+    if match:
+        id = int(match.group(1))
+        return id
+    else:
+        return -1
+
+
 def show_navigation_window():
     global results_text
     text_window = Tk()
@@ -978,15 +1044,19 @@ def show_navigation_window():
     from_combo.pack(side=LEFT, padx=5)
     from_combo.config(values=room_names_no_new())
     from_combo.current(0)
-    to_label = Label(combo_panel, text="From Room:", bg=LIGHT_GRAY)
+    set_combo_to_current_room(from_combo)
+    to_label = Label(combo_panel, text="To Room:", bg=LIGHT_GRAY)
     to_label.pack(side=LEFT, padx=5)
     to_combo = ttk.Combobox(combo_panel, width=20, textvariable=to_str)
     to_combo.config(values=room_names_no_new())
     to_combo.pack(side=LEFT, padx=5)
     to_combo.current(0)
+    swap_button = Button(combo_panel, text="Swap", command=lambda: swap_rooms_in_combos(from_combo, to_combo))
+    swap_button.pack(side=LEFT, padx=5)
     combo_panel.pack(side=TOP, fill=X, pady=5)
-    get_text_but = Button(text_window, text="Get Commands", command=lambda: generate_navigation(from_combo.get(), to_combo.get()))
+    get_text_but = Button(text_window, text="Get Directions", command=lambda: generate_navigation(from_combo.get(), to_combo.get()))
     get_text_but.pack(side=TOP, pady=5)
+
 
     results_text = scrolledtext.ScrolledText(text_window, width=40, height=10)
 
