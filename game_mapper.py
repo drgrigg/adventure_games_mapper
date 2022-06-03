@@ -161,8 +161,9 @@ room_var_2 = StringVar()
 search_combo: ttk.Combobox = None
 
 def logging(string: str):
-    with open(os.path.join(db_folder, "log.txt"), "a") as f:
-        f.write(string + "\n")
+    pass  # turned off logging
+    # with open(os.path.join(db_folder, "log.txt"), "a") as f:
+    #     f.write(string + "\n")
 
 def delete_log():
     if os.path.exists(os.path.join(db_folder, "log.txt")):
@@ -330,20 +331,20 @@ def draw_controls(window: Tk):
     name_lab.pack(side=LEFT, padx=5)
     name_entry = Entry(entry_pane, width=25)
     name_entry.pack(side=LEFT, pady=5)
-    entry_pane.pack(side=TOP, pady=5)
+    entry_pane.pack(side=TOP, pady=15)
 
     desc_text = Text(room_pane, width=60, height=10)
-    desc_text.pack(side=TOP, pady=5)
+    desc_text.pack(side=TOP, pady=15)
 
-    update_but = Button(room_pane, text="Update", command=update_room_details)
-    update_but.pack(side=TOP, pady=5)
+    update_but = Button(room_pane, text="Update", width=20, command=update_room_details)
+    update_but.pack(side=TOP, pady=15)
 
-    room_pane.pack(side=LEFT, padx=5)
+    room_pane.pack(side=LEFT, padx=5, fill=Y)
 
     # we'll fill this with buttons representing the directions we can go
     button_pane = Frame(data_pane, bg=LIGHT_GRAY, height=500)
     button_pane.pack(side=LEFT, padx=5)
-    data_pane.pack(side=TOP, padx=5, fill=X)
+    data_pane.pack(side=TOP, padx=5, fill=BOTH)
 
     new_path_pane = Frame(window, bg=LIGHT_GRAY, height=200, highlightbackground=DARK_GRAY, highlightthickness=1)
     new_path_pane.pack(side=TOP, fill=X, pady=5)
@@ -577,7 +578,7 @@ def draw_new_path_controls(room_id: id):
         one_way_but.pack(side=LEFT, padx=5, fill=X)
         two_way_but = Button(inside_pane, text="Create 2-Way Paths", command=lambda: add_path_to_room(room_id, direction_var.get(), room_var.get(), mutual=True))
         two_way_but.pack(side=LEFT, padx=5, fill=X)
-        new_room_but = Button(new_path_pane, text="Create Unconnected Room", command=add_unconnected_room)
+        new_room_but = Button(new_path_pane, text="Create Unconnected Room", width=20, command=add_unconnected_room)
         new_room_but.pack(side=TOP, pady=25)
 
         # control buttons
@@ -642,7 +643,7 @@ def go_to_room(room_id):
     if button_pane:
         button_pane.destroy()
     button_pane = Frame(data_pane, bg=LIGHT_GRAY, height=500)
-    button_pane.pack(side=LEFT, padx=25)
+    button_pane.pack(side=LEFT, padx=25, fill=Y)
     other_rooms_pane = Frame(button_pane, bg=LIGHT_GRAY)
     other_rooms_lab = Label(other_rooms_pane, text="Go direct to:", bg=LIGHT_GRAY)
     other_rooms_lab.pack(side=LEFT, padx=5)
