@@ -141,7 +141,7 @@ BLACK = "#000000"
 CREAM = "#F8EECB"
 
 window = Tk()
-window.geometry("960x500+200+200")
+window.geometry("960x580+200+200")
 window.title("Adventure Game Mapper")
 window.config(bg=LIGHT_GRAY)
 
@@ -160,6 +160,13 @@ room_var = StringVar()
 room_var_2 = StringVar()
 search_combo: ttk.Combobox = None
 
+def logging(string: str):
+    with open(os.path.join(db_folder, "log.txt"), "a") as f:
+        f.write(string + "\n")
+
+def delete_log():
+    if os.path.exists(os.path.join(db_folder, "log.txt")):
+        os.remove(os.path.join(db_folder, "log.txt"))
 
 def create_new_db(path_to_db: str):
     conn = sqlite3.connect(path_to_db)
@@ -286,7 +293,7 @@ def draw_menu(window: Tk):
     menubar.add_cascade(label="File", menu=filemenu)
     toolmenu = Menu(menubar, tearoff=0)
     toolmenu.add_command(label="Show Map", command=make_map_window)
-    toolmenu.add_command(label="Generate Navigation", command=show_navigation_window)
+    toolmenu.add_command(label="Find Path", command=show_navigation_window)
     toolmenu.add_command(label="Search Rooms", command=show_search_window)
     menubar.add_cascade(label="Tools", menu=toolmenu)
 
@@ -566,14 +573,22 @@ def draw_new_path_controls(room_id: id):
         rooms_combo.config(values=room_names())
         rooms_combo.current(0)
         rooms_combo.pack(side=LEFT, padx=5)
-        button = Button(inside_pane, text="Create 1-Way Path", command=lambda: add_path_to_room(room_id, direction_var.get(), room_var.get()))
-        button.pack(side=LEFT, padx=5, fill=X)
-        button3 = Button(inside_pane, text="Create 2-Way Paths", command=lambda: add_path_to_room(room_id, direction_var.get(), room_var.get(), mutual=True))
-        button3.pack(side=LEFT, padx=5, fill=X)
+        one_way_but = Button(inside_pane, text="Create 1-Way Path", command=lambda: add_path_to_room(room_id, direction_var.get(), room_var.get()))
+        one_way_but.pack(side=LEFT, padx=5, fill=X)
+        two_way_but = Button(inside_pane, text="Create 2-Way Paths", command=lambda: add_path_to_room(room_id, direction_var.get(), room_var.get(), mutual=True))
+        two_way_but.pack(side=LEFT, padx=5, fill=X)
         new_room_but = Button(new_path_pane, text="Create Unconnected Room", command=add_unconnected_room)
-        new_room_but.pack(side=TOP, padx=5)
-        map_but = Button(new_path_pane, text="Show Map", width=30, command=make_map_window)
-        map_but.pack(side=TOP, pady=5)
+        new_room_but.pack(side=TOP, pady=25)
+
+        # control buttons
+        path_buttons_pane = Frame(new_path_pane, bg=LIGHT_GRAY, height=50)
+        map_but = Button(path_buttons_pane, text="Show Map", width=20, command=make_map_window)
+        map_but.pack(side=LEFT, padx=10)
+        nav_but = Button(path_buttons_pane, text="Find Path", width=20, command=show_navigation_window)
+        nav_but.pack(side=LEFT, padx=10)
+        src_but = Button(path_buttons_pane, text="Search Rooms", width=20, command=show_search_window)
+        src_but.pack(side=LEFT, padx=10)       
+        path_buttons_pane.pack(side=TOP, pady=25)
 
 def go_to_room_from_combo(event):
     room_str = room_var_2.get()
@@ -627,7 +642,7 @@ def go_to_room(room_id):
     if button_pane:
         button_pane.destroy()
     button_pane = Frame(data_pane, bg=LIGHT_GRAY, height=500)
-    button_pane.pack(side=LEFT, padx=5)
+    button_pane.pack(side=LEFT, padx=25)
     other_rooms_pane = Frame(button_pane, bg=LIGHT_GRAY)
     other_rooms_lab = Label(other_rooms_pane, text="Go direct to:", bg=LIGHT_GRAY)
     other_rooms_lab.pack(side=LEFT, padx=5)
@@ -666,7 +681,7 @@ def place_buttons(path):
     delete_button = Button(path_pane, text="X", relief=RAISED, command=lambda: delete_path(path, path_pane))
     delete_button.pack(side=RIGHT, padx=5)
 
-    go_button = Button(path_pane, text=f"{path.to_room.name}", relief=RAISED, command=lambda: go_to_room(path.to_room.id))
+    go_button = Button(path_pane, text=f"{path.to_room.name}", width=20, relief=RAISED, command=lambda: go_to_room(path.to_room.id))
     go_button.pack(side=RIGHT, padx=5)
  
     label = Label(path_pane, bg=LIGHT_GRAY, text=f"{path.direction.name}: ")
@@ -860,13 +875,19 @@ results_text: scrolledtext.ScrolledText = None
 nav_stack: List[Path] = []
 solutions = []
 
+def list_nav_stack() -> str:
+    accum: str = ""
+    for path in nav_stack:
+        accum += path.from_room.name + "->"
+    return accum
+
 def search_outward(from_id: int, wanted_id: int):
     global nav_stack, search_success, rooms
     out_paths = get_unvisited_paths(from_id)  # also rejects deadend rooms
     if not out_paths:  # we've reached a deadend, mark it as such
         from_room = get_room_from_id(from_id)
         from_room.deadend = True
-        print("reached dead end")
+        logging("Dead end! Tried: " + list_nav_stack())
         nav_stack.pop()
         return
         
@@ -877,10 +898,10 @@ def search_outward(from_id: int, wanted_id: int):
         index = randint(0, len(out_paths)-1)
         path = out_paths[index]
     nav_stack.append(path)
-    print(f"checking {path.from_room.name} -> {path.to_room.name}")
+    # logging(f"checking {path.from_room.name} -> {path.to_room.name}")
     
     if path.to_room.id == wanted_id:
-        print("found!")
+        logging("Found!" + list_nav_stack() + "->" + path.to_room.name)
         search_success = True
         return
     else:
@@ -916,27 +937,10 @@ def generate_navigation(from_room_str: str, to_room_str: str):
     for room in rooms:
         room.deadend = False
     
-    # loop through this lots of times (random walks)
-    for _ in range(0, 20):
+    # loop through this lots of times (taking random walks)
+    for _ in range(0, 50):
         nav_stack = []
         for room in rooms:
-            room.visited = False
-        from_room.visited = True
-        search_success = False
-        search_outward(from_id, to_id)
-        if search_success:
-            temp = [] # need to COPY values
-            for path in nav_stack:
-                temp.append(path)
-            solutions.append(temp) 
-    
-    for room in rooms:
-        room.deadend = False
-
-    # now go through list of rooms in reverse order
-    for _ in range(0, 20):
-        nav_stack = []
-        for room in reversed(rooms):
             room.visited = False
         from_room.visited = True
         search_success = False
@@ -1057,14 +1061,13 @@ def show_navigation_window():
     get_text_but = Button(text_window, text="Get Directions", command=lambda: generate_navigation(from_combo.get(), to_combo.get()))
     get_text_but.pack(side=TOP, pady=5)
 
-
     results_text = scrolledtext.ScrolledText(text_window, width=40, height=10)
 
     # results_text = Text(text_window, width=60, height=5)
     results_text.pack(side=TOP, pady=5)
     text_window.mainloop()
 
-
+delete_log()
 draw_menu(window)
 draw_controls(window)
 if db_path:  # passed as argument
