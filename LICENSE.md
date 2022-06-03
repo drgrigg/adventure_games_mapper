@@ -1,0 +1,1 @@
+I'm happy for others to fork and freely use this code but would request attribution of the original project to myself, David R. Grigg, and that I be advised of any suggestions or improvements.
