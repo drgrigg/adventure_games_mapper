@@ -95,6 +95,28 @@ class Path():
         self.from_room = from_room
 
 
+class Object():
+    object_id = 0
+    name = ""
+    found_id = 0
+    current_id = 0
+    aliases = ""
+
+    def __init__(self, name: str, found_id: int, current_id: int):
+        self.object_id = 0
+        self.name = name
+        self.found_id = found_id
+        self.current_id = current_id
+    def __lt__(self, other) -> bool:
+        if self.name == other.name:
+            if self.id < other.id:
+                return True
+        else:
+            if self.name < other.name:
+                return True
+        return False     
+
+
 folder = os.path.normpath(sys.argv[0])
 folder_bits = os.path.split(folder)
 my_folder = folder_bits[0]
@@ -112,6 +134,7 @@ if len(sys.argv) > 1:
 rooms: List[Room] = []
 directions: List[Direction] = []
 paths: List[Path] = []
+objs: List[Object] = []
 # combos: List[ttk.Combobox] = []
 
 def room_names() -> list:
@@ -128,6 +151,14 @@ def room_names_no_new() -> list:
     return ret_list
 
 
+def obj_names() -> list:
+    ret_list = []
+    obj: Object = None
+    for obj in sorted(objs):
+        ret_list.append(f"{obj.name} : {obj.object_id}")
+    return ret_list
+
+
 def direction_names() -> list:
     ret_list = ["None"]
     for direction in directions:
@@ -140,17 +171,32 @@ DARK_GRAY = "#808080"
 BLACK = "#000000"
 CREAM = "#F8EECB"
 
-window = Tk()
-window.geometry("960x580+200+200")
-window.title("Adventure Game Mapper")
-window.config(bg=LIGHT_GRAY)
 
+def centre_window(win: Tk, width: int, height: int):
+    win.title("Add Outline to PDF file")
+    win.configure(bg=LIGHT_GRAY)
+    win.resizable(False, False)
+
+    screen_width = win.winfo_screenwidth()
+    screen_height = win.winfo_screenheight()
+
+    xpos = int((screen_width/2) - (width/2))
+    ypos = int((screen_height/2) - (height/2))
+    geom_str = f"{width}x{height}+{xpos}+{ypos}"
+    win.geometry(geom_str)
+
+
+window = Tk()
+centre_window(window, 960, 650)
+window.title("Adventure Game Mapper")
 
 current_room: Room = None
 db_lab: Label = None
 name_lab: Label = None
 name_entry: Entry = None
 desc_text: Text = None
+# found_text: Text = None
+current_text: Text = None
 button_pane: Frame = None
 new_path_pane: Frame = None
 search_pane : Frame = None
@@ -158,6 +204,7 @@ data_pane: Frame = None
 direction_var = StringVar()
 room_var = StringVar()
 room_var_2 = StringVar()
+wanted_obj: Object = None
 search_combo: ttk.Combobox = None
 
 def logging(string: str):
@@ -209,11 +256,12 @@ def make_new_file(init_folder:str) -> str:
     return gamefile
 
 def load_data(path_to_db: str):
-    global rooms, directions, paths
+    global rooms, directions, paths, objs
     conn = sqlite3.connect(path_to_db)
     cursor = conn.cursor()
     rooms = []
     paths = []
+    objs = []
     directions = []
     sql = "SELECT * FROM ROOMS"
     cursor.execute(sql)
@@ -249,6 +297,17 @@ def load_data(path_to_db: str):
         to_room = get_room_from_id(to_id)
         path = Path(direction, to_room, from_room)
         paths.append(path)
+    sql = "SELECT * FROM OBJECTS "
+    cursor.execute(sql)
+    rows = cursor.fetchall()
+    for row in rows:
+        obj_name = row[1]
+        found_id = row[2]
+        current_id = row[3]
+        obj = Object(obj_name, found_id, current_id)
+        obj.object_id = row[0]
+        obj.aliases = row[4]
+        objs.append(obj)
     
 
 def clear_combo(combo: ttk.Combobox):
@@ -293,8 +352,9 @@ def draw_menu(window: Tk):
     filemenu.add_command(label="Exit", command=window.quit)
     menubar.add_cascade(label="File", menu=filemenu)
     toolmenu = Menu(menubar, tearoff=0)
-    toolmenu.add_command(label="Show Map", command=make_map_window)
-    toolmenu.add_command(label="Find Path", command=show_navigation_window)
+    toolmenu.add_command(label="Show Map", command=show_map_window)
+    toolmenu.add_command(label="Find Path to Room", command=show_navigation_window)
+    toolmenu.add_command(label="Find Path to Object", command=show_find_object_window)
     toolmenu.add_command(label="Search Rooms", command=show_search_window)
     menubar.add_cascade(label="Tools", menu=toolmenu)
 
@@ -304,6 +364,99 @@ def draw_menu(window: Tk):
     menubar.add_cascade(label="Help", menu=helpmenu)
 
     window.config(menu=menubar)
+
+
+def get_objs_by_name(name: str) -> list:
+    # this is tricky because we really need aliases, eg "Coins" for "Bag of Coins"
+    # but what do we do when we have "Nasty Knife", "Rusty Knife" etc??
+    obj_list = []
+    obj: Object = None
+    for obj in objs:
+        if name.upper() == obj.name.upper():  # try for exact match first
+            obj_list.append(obj)
+        elif name.upper() in obj.name.upper(): # try for partial match, eg 'Knife' in 'Rusty Knife'
+            obj_list.append(obj)
+        elif obj.aliases and name.upper() in obj.aliases.upper():
+            obj_list.append(obj)
+    return obj_list
+
+
+def remove_current_objs_from_room(room_id: int):
+    for obj in objs:
+        if obj.current_id == room_id:
+            obj.current_id = 0
+    sql = f'UPDATE OBJECTS SET CurrentRoom=0 WHERE CurrentRoom={room_id}'
+    db_execute(sql)
+
+
+def place_found_objects(found_str: str, room_id: int):
+    global objs
+    found_str = found_str.strip()
+    test_list = get_found_objs_names(room_id=room_id)
+    test_str = ",".join(test_list)
+    if test_str == found_str:
+        return  #nothing to do
+    names = found_str.split(sep=",")
+    for name in names:
+        name = name.strip()
+        name = name.title()
+        if not name:
+            return
+        obj_list = get_objs_by_name(name)
+        obj: Object = None
+        if len(obj_list) > 1:
+            show_obj_select(obj_list)
+            obj = wanted_obj
+        if obj:
+            obj.found_id = room_id
+            obj.current_id = room_id
+            sql = f'UPDATE OBJECTS SET FoundRoom = {room_id}, CurrentRoom = {room_id} WHERE ID={obj.object_id}'
+            db_execute(sql)
+        else:
+            obj = Object(name, found_id=room_id, current_id=room_id)
+            sql = f'INSERT INTO OBJECTS(Name,FoundRoom,CurrentRoom) VALUES("{name}",{room_id},{room_id})'
+            obj.object_id = db_execute_get_id(sql)
+            objs.append(obj)
+
+
+def update_object_location(obj: Object, name: str, room_id: int):
+        # we may pass None as object to this function
+        if obj:
+            obj.current_id = room_id
+            sql = f'UPDATE OBJECTS SET CurrentRoom = {room_id} WHERE ID={obj.object_id}'
+            db_execute(sql)
+        else:
+            obj = Object(name, found_id=room_id, current_id=room_id)
+            sql = f'INSERT INTO OBJECTS(Name,FoundRoom,CurrentRoom) VALUES("{name.title()}",{room_id},{room_id})'
+            obj.object_id = db_execute_get_id(sql)
+            objs.append(obj)
+
+
+def place_current_objects(current_str: str, room_id: int):
+    global objs
+    current_str = current_str.strip()
+    test_list = get_current_objs_names(room_id=room_id)
+    test_str = ",".join(test_list)
+    if test_str == current_str:
+        return  #nothing to do
+    # tricky thing here is deleting objects REMOVED from the list. So remove them ALL from the room, then add them back.
+    remove_current_objs_from_room(room_id)
+
+    names = current_str.split(sep=",")
+    for name in names:
+        name = name.strip()
+        if not name:
+            return
+        name = name.title()
+
+        obj_list = get_objs_by_name(name) # returns a list of close matches
+        if len(obj_list) == 1:  # object found, only one (which is what we want)
+            update_object_location(obj_list[0], name, room_id)
+        elif len(obj_list) == 0:
+            update_object_location(None, name, room_id)
+        else:  # have to choose beween possible matches
+            show_obj_select(obj_list, name, room_id)
+
 
 def update_room_details():
     if current_room:
@@ -315,17 +468,19 @@ def update_room_details():
             current_room.description = temp_desc
             sql = f'UPDATE ROOMS SET Name = "{temp_name}", Description = "{temp_desc}" WHERE Id = {current_room.id}'
             db_execute(sql)
+        current_str = current_text.get('1.0', END)
+        place_current_objects(current_str, current_room.id)
 
 
 def draw_controls(window: Tk):
-    global db_lab, name_lab, name_entry, desc_text, button_pane, new_path_pane, data_pane, search_pane
+    global db_lab, name_lab, name_entry, desc_text, button_pane, new_path_pane, data_pane, search_pane, current_text
 
     db_lab = Label(window, text="Game file: none selected", bg=LIGHT_GRAY)
     db_lab.pack(side=TOP, pady=5, fill=X)
 
-    data_pane = Frame(window, bg=LIGHT_GRAY, height=600)
+    data_pane = Frame(window, bg=LIGHT_GRAY, height=700)
     
-    room_pane = Frame(data_pane, bg=LIGHT_GRAY, height=500)
+    room_pane = Frame(data_pane, bg=LIGHT_GRAY, height=600)
     entry_pane = Frame(room_pane, bg=LIGHT_GRAY)
     name_lab = Label(entry_pane, text="Room:", bg=LIGHT_GRAY)
     name_lab.pack(side=LEFT, padx=5)
@@ -333,8 +488,23 @@ def draw_controls(window: Tk):
     name_entry.pack(side=LEFT, pady=5)
     entry_pane.pack(side=TOP, pady=15)
 
-    desc_text = Text(room_pane, width=60, height=10)
-    desc_text.pack(side=TOP, pady=15)
+    desc_text = Text(room_pane, width=60, height=8)
+    desc_text.pack(side=TOP, pady=5)
+
+    objs_pane = Frame(room_pane, bg=LIGHT_GRAY, height=100)
+    current_pane = Frame(objs_pane, bg=LIGHT_GRAY, height=50)
+    current_label = Label(current_pane, text="Objects here:", bg=LIGHT_GRAY)
+    current_label.pack(side=LEFT, padx=5)
+    current_text = Text(current_pane, width=50, height=2)
+    current_text.pack(side=LEFT, padx=5)
+    current_pane.pack(side=TOP, pady=5)
+    # found_pane = Frame(objs_pane, bg=LIGHT_GRAY, height=50)
+    # objs_label = Label(found_pane, text="Objects found here first:", bg=LIGHT_GRAY)
+    # objs_label.pack(side=LEFT, padx=5)
+    # found_text = Text(found_pane, width=35, height=1)
+    # found_text.pack(side=LEFT, padx=5)
+    # found_pane.pack(side=TOP, pady=5)
+    objs_pane.pack(side=TOP, pady=5)
 
     update_but = Button(room_pane, text="Update", width=20, command=update_room_details)
     update_but.pack(side=TOP, pady=15)
@@ -395,6 +565,22 @@ def get_inward_paths(room_id: int) -> list:
     return path_list
 
 
+def get_found_objs_names(room_id: int) -> list:
+    obj_list = []
+    for obj in objs:
+        if obj.found_id == room_id:
+            obj_list.append(obj.name)
+    return obj_list
+
+
+def get_current_objs_names(room_id: int) -> list:
+    obj_list = []
+    for obj in objs:
+        if obj.current_id == room_id:
+            obj_list.append(obj.name)
+    return obj_list
+
+
 def distance_between(room1: Room, room2: Room) -> float:
     return math.sqrt((room2.xpos - room1.xpos) ** 2 + (room2.ypos - room1.ypos) ** 2)
 
@@ -413,12 +599,12 @@ def add_unconnected_room():
     # we need to place it geometrically in a different area until we update it with a new path to it
     fudge = int(get_max_room_distance()) + 50.0
     sql = f'INSERT INTO ROOMS (Name, Description, X, Y, Z) VALUES ("New Room", "Description", {fudge}, {fudge}, {0.0})'
-    new_id = db_execute_get_id(sql)
-    new_room = Room(new_id, "New Room", "Description")
+    current_id = db_execute_get_id(sql)
+    new_room = Room(current_id, "New Room", "Description")
     new_room.set_position(fudge, fudge, 0.0)
     rooms.append(new_room)
     update_room_details()  #updates current room
-    go_to_room(new_id)
+    go_to_room(current_id)
 
 
 def add_path_to_room(from_id: int, direct_str: str, room_str: str, mutual: bool = False):
@@ -583,13 +769,14 @@ def draw_new_path_controls(room_id: id):
 
         # control buttons
         path_buttons_pane = Frame(new_path_pane, bg=LIGHT_GRAY, height=50)
-        map_but = Button(path_buttons_pane, text="Show Map", width=20, command=make_map_window)
+        map_but = Button(path_buttons_pane, text="Show Map", width=20, command=show_map_window)
         map_but.pack(side=LEFT, padx=10)
-        nav_but = Button(path_buttons_pane, text="Find Path", width=20, command=show_navigation_window)
+        nav_but = Button(path_buttons_pane, text="Find Path to Room", width=20, command=show_navigation_window)
         nav_but.pack(side=LEFT, padx=10)
-        src_but = Button(path_buttons_pane, text="Search Rooms", width=20, command=show_search_window)
+        src_but = Button(path_buttons_pane, text="Find Path to Object", width=20, command=show_find_object_window)
         src_but.pack(side=LEFT, padx=10)       
         path_buttons_pane.pack(side=TOP, pady=25)
+
 
 def go_to_room_from_combo(event):
     room_str = room_var_2.get()
@@ -625,7 +812,7 @@ def go_to_room_from_string(roomstr: str):
 
 
 def go_to_room(room_id):
-    global window, button_pane, new_path_pane, data_pane, current_room, room_var_2, name_lab, name_entry
+    global current_room, button_pane, new_path_pane, current_text
     next_room = get_room_from_id(room_id)
     if next_room:
         current_room = next_room
@@ -638,6 +825,10 @@ def go_to_room(room_id):
         if desc_text:
             desc_text.delete('1.0', END)
             desc_text.insert('1.0', next_room.description)
+        if current_text:
+            current_text.delete('1.0', END)
+            currents = get_current_objs_names(room_id)
+            current_text.insert('1.0', ",".join(currents))
     else:
         return
     if button_pane:
@@ -665,8 +856,6 @@ def go_to_room(room_id):
     new_path_pane.pack(side=TOP, pady=5, fill=X)
     draw_new_path_controls(room_id)
 
-    # navig_button = Button(window, text="Get Navigation Commands", command=show_textpath_window, tags="navbutton")
-    # navig_button.pack(side=TOP, pady=5)
 
 def delete_path(path: Path, path_pane: Frame):
     sql = f'DELETE FROM PATHS WHERE DIRECTIONID = {path.direction.id} AND FROMID = {path.from_room.id} AND TOID = {path.to_room.id}'
@@ -752,24 +941,41 @@ def draw_legend(canvas: Canvas):
     canvas.create_text(40, 150, text="Enter-Leave: ", anchor=W)
     canvas.create_text(40, 170, text="Special/Magic: ", anchor=W)
 
-    canvas.create_line(150,50,250,50,fill=directions[0].colour, width=2)
-    canvas.create_line(150,70,250,70,fill=directions[2].colour, width=2)
-    canvas.create_line(150,90,250,90,fill=directions[7].colour, width=2)
-    canvas.create_line(150,110,250,110,fill=directions[1].colour, width=2)
-    canvas.create_line(150,130,250,130,fill=directions[8].colour, width=2, dash=(3,2))
-    canvas.create_line(150,150,250,150,fill=directions[10].colour, width=2, dash=(4,3))
-    canvas.create_line(150,170,250,170,fill=directions[16].colour, width=3, dash=(1,2))
+    canvas.create_line(150,50,200,50,fill=directions[0].colour, width=2)
+    canvas.create_line(210,50,260,50,fill=directions[0].colour, dash=(10,1), width=2)
+
+    canvas.create_line(150,70,200,70,fill=directions[2].colour, width=2)
+    canvas.create_line(210,70,260,70,fill=directions[2].colour, dash=(10,1), width=2)
+
+    canvas.create_line(150,90,200,90,fill=directions[7].colour, width=2)
+    canvas.create_line(210,90,260,90,fill=directions[7].colour, dash=(10,1), width=2)
+
+    canvas.create_line(150,110,200,110,fill=directions[1].colour, width=2)
+    canvas.create_line(210,110,260,110,fill=directions[1].colour, dash=(10,1),width=2)
+
+    canvas.create_line(150,130,200,130,fill=directions[8].colour, width=2, dash=(3,2))
+    canvas.create_line(210,130,260,130,fill=directions[9].colour, width=3, dash=(2,3))
+
+    canvas.create_line(150,150,200,150,fill=directions[10].colour, width=2, dash=(4,3))
+    canvas.create_line(210,150,260,150,fill=directions[11].colour, width=3, dash=(3,4))
+
+    canvas.create_line(150,170,260,170,fill=directions[16].colour, width=3, dash=(1,2))
 
 
-def make_map_window():
+def key_pressed_in_map(event):
+    pass
+
+
+def show_map_window():
     global map_window, map_canvas, current_map_room
     map_window = Tk()
-    map_window.geometry("1500x1000")
+    centre_window(map_window, 1500, 1000)
     map_window.title("Map")
     map_canvas = Canvas(map_window, bg='#EEEEEE', width=1490, height=950)
     draw_legend(map_canvas)
     map_canvas.pack(fill=BOTH)
     map_canvas.bind("<Button>", map_clicked)
+    map_canvas.bind("<Key>", key_pressed_in_map)
     current_map_room = current_room
     display_map()
     map_window.mainloop()
@@ -841,10 +1047,18 @@ def draw_paths():
         start_x, start_y = start_connect
         end_x, end_y = end_connect
 
-        if path.direction.id >= 9 and path.direction.id <= 10:  # up, down - draw dashed line
+        if path.direction.id in [1,2,3,4,13,15]:  # N, NE, E, SE, Port, Afore
+            map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, width=2)
+        elif path.direction.id in [5,6,7,8,14,16]: # S, SW, W, NW, Starboard, Astern
+            map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, dash=(10,1), width=2)
+        elif path.direction.id == 9:  # up
             map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, dash=(3,2), width=2)
-        elif path.direction.id >= 11 and path.direction.id <= 12:  # enter, exit - draw dashed line
-            map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, dash=(4,3), width=2)
+        elif path.direction.id == 10:  # down
+            map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, dash=(2,2), width=3)
+        elif path.direction.id == 11:  # enter
+            map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, dash=(3,4), width=2)
+        elif path.direction.id == 12:  # exit - draw dashed line
+            map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, dash=(4,3), width=3)
         elif path.direction.id == 17:  # magic - draw dotted line
             map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, dash=(1,2), width=3)
         else:
@@ -864,7 +1078,7 @@ def draw_rooms(do_draw: bool = False):
                 if not room.id == current_map_room.id:
                     map_canvas.create_oval(bounds[0] - 10, bounds[1] - 20, bounds[2] + 10, bounds[3] + 20, fill="white")
                 else: # "You are here"
-                    map_canvas.create_oval(bounds[0] - 10, bounds[1] - 20, bounds[2] + 10, bounds[3] + 20, fill=CREAM, outline="red", width=2)
+                    map_canvas.create_oval(bounds[0] - 10, bounds[1] - 20, bounds[2] + 10, bounds[3] + 20, fill=CREAM, outline="red", width=2, tags=f"{current_map_room.id}")
             room.bubble_bounds = (bounds[0] - 10, bounds[1] - 20, bounds[2] + 10, bounds[3] + 20)
             # now write text again
             map_canvas.delete(myText)
@@ -916,6 +1130,21 @@ def reveal_solution(solution: list):
         nav_str += f"{found_path.direction.name} to {found_path.to_room.name}\n"
     results_text.delete("1.0", END)
     results_text.insert(END, nav_str)
+
+
+def generate_navigation_to_obj(from_room_str: str, to_obj_str: str):
+    match = regex.search(r": (\d+)$", to_obj_str)
+    if match:
+       to_id = int(match.group(1))
+    else:
+        return
+    # find room where the object currently is
+    obj: Object = None
+    for obj in objs:
+        if obj.object_id == to_id:
+            room_id = obj.current_id
+            # fudge a call to the room to room navigation
+            generate_navigation(from_room_str, f"xxxx : {room_id}")
 
 
 def generate_navigation(from_room_str: str, to_room_str: str):
@@ -980,11 +1209,52 @@ def search_for(searchtext: str):
         search_combo.config(values=found_list)
         search_combo.current(0)
 
+def get_obj_names_from_list(obj_list) -> list:
+    names = []
+    obj: Object = None
+    for obj in sorted(obj_list):
+        names.append(f"{obj.name} : {obj.object_id}")
+    return names
+
+def get_object_from_id(id: int) -> Object:
+    obj: Object = None
+    for obj in objs:
+        if obj.object_id == id:
+            return obj
+    return None
+
+
+def obj_combo_selected(wanted: str, name: str, room_id: int, win: Tk):
+    match = regex.search(f": (\d+)", wanted)
+    if match:
+        wanted_id = int(match.group(1))
+        obj = get_object_from_id(wanted_id)
+        update_object_location(obj, name, room_id)
+    win.destroy()
+
+
+def show_obj_select(obj_list: list, name: str, room_id: int):
+    select_win = Tk()
+    centre_window(select_win, 500, 150)
+    select_win.title("Select object")
+    select_win.config(bg=LIGHT_GRAY)
+    label = Label(select_win, text="Which of these objects do you mean?", bg=LIGHT_GRAY)
+    label.pack(side=TOP, pady=5)
+    combo_str = StringVar()
+    obj_combo = ttk.Combobox(select_win, width=20, textvariable=combo_str)
+    obj_combo.pack(side=LEFT, padx=5)
+    obj_combo.config(values=get_obj_names_from_list(obj_list))
+    obj_combo.current(0)
+    obj_combo.pack(side=TOP, pady=5)
+    ok_button = Button(select_win, text="OK", bg=LIGHT_GRAY, command=lambda: obj_combo_selected(obj_combo.get(), name, room_id, select_win))
+    ok_button.pack(side=TOP, pady=5)
+    select_win.mainloop()
+
 
 def show_search_window():
     global search_combo, room_var_2
     search_win = Tk()
-    search_win.geometry("500x150+250+250")
+    centre_window(search_win, 500, 150)
     search_win.title("Search for text in rooms")
     search_win.config(bg=LIGHT_GRAY)
 
@@ -1035,7 +1305,7 @@ def get_id_from_string(idstr: str) -> int:
 def show_navigation_window():
     global results_text
     text_window = Tk()
-    text_window.geometry("700x250+250+250")
+    centre_window(text_window, 700, 250)
     text_window.title("Get navigation commands")
     text_window.config(bg=LIGHT_GRAY)
 
@@ -1060,6 +1330,41 @@ def show_navigation_window():
     swap_button.pack(side=LEFT, padx=5)
     combo_panel.pack(side=TOP, fill=X, pady=5)
     get_text_but = Button(text_window, text="Get Directions", command=lambda: generate_navigation(from_combo.get(), to_combo.get()))
+    get_text_but.pack(side=TOP, pady=5)
+
+    results_text = scrolledtext.ScrolledText(text_window, width=40, height=10)
+
+    # results_text = Text(text_window, width=60, height=5)
+    results_text.pack(side=TOP, pady=5)
+    text_window.mainloop()
+
+
+def show_find_object_window():
+    global results_text
+    text_window = Tk()
+    centre_window(text_window, 700, 250)
+    text_window.title("Navigate to object")
+    text_window.config(bg=LIGHT_GRAY)
+
+    from_str = StringVar()
+    to_str = StringVar()
+
+    combo_panel = Frame(text_window, bg=LIGHT_GRAY)
+    from_label = Label(combo_panel, text="From Room:", bg=LIGHT_GRAY)
+    from_label.pack(side=LEFT, padx=5)
+    from_combo = ttk.Combobox(combo_panel, width=20, textvariable=from_str)
+    from_combo.pack(side=LEFT, padx=5)
+    from_combo.config(values=room_names_no_new())
+    from_combo.current(0)
+    set_combo_to_current_room(from_combo)
+    to_label = Label(combo_panel, text="To Object:", bg=LIGHT_GRAY)
+    to_label.pack(side=LEFT, padx=5)
+    to_combo = ttk.Combobox(combo_panel, width=20, textvariable=to_str)
+    to_combo.config(values=obj_names())
+    to_combo.pack(side=LEFT, padx=5)
+    to_combo.current(0)
+    combo_panel.pack(side=TOP, fill=X, pady=5)
+    get_text_but = Button(text_window, text="Get Directions", command=lambda: generate_navigation_to_obj(from_combo.get(), to_combo.get()))
     get_text_but.pack(side=TOP, pady=5)
 
     results_text = scrolledtext.ScrolledText(text_window, width=40, height=10)

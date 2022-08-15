@@ -25,3 +25,6 @@ DROP TABLE IF EXISTS `Rooms`;
 CREATE TABLE `Rooms` (`ID` integer PRIMARY KEY AUTOINCREMENT, `Name` char(255) NOT NULL, `Description` varchar(255));
 INSERT INTO `Rooms` (`ID`,`Name`,`Description`) VALUES (1,'First Room','A place to start');
 INSERT INTO `Rooms` (`ID`,`Name`,`Description`) VALUES (2,'Second room','Somewhere to go');
+DROP TABLE IF EXISTS `Objects`;
+CREATE TABLE IF NOT EXISTS `Objects` (`ID` integer PRIMARY KEY, `Name` char(128),`FoundRoom` integer,`CurrentRoom` integer,
+  `Aliases` char(128));

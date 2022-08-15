@@ -11,7 +11,7 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["/Users/david/WorkingFiles/Python/adventure_games/zork2.db"]
+            "args": ["/Users/david/WorkingFiles/Python/adventure_games/zork1.db"]
         }
     ]
 }
