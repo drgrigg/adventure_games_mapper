@@ -193,9 +193,10 @@ window.title("Adventure Game Mapper")
 current_room: Room = None
 db_lab: Label = None
 name_lab: Label = None
-name_entry: Entry = None
+room_name_entry: Entry = None
+obj_name_entry: Entry = None
+obj_alias_entry: Entry = None
 desc_text: Text = None
-# found_text: Text = None
 current_text: Text = None
 button_pane: Frame = None
 new_path_pane: Frame = None
@@ -206,6 +207,9 @@ room_var = StringVar()
 room_var_2 = StringVar()
 wanted_obj: Object = None
 search_combo: ttk.Combobox = None
+object_combo: ttk.Combobox = None
+found_combo: ttk.Combobox = None
+current_combo: ttk.Combobox = None
 
 def logging(string: str):
     pass  # turned off logging
@@ -356,6 +360,8 @@ def draw_menu(window: Tk):
     toolmenu.add_command(label="Find Path to Room", command=show_navigation_window)
     toolmenu.add_command(label="Find Path to Object", command=show_find_object_window)
     toolmenu.add_command(label="Search Rooms", command=show_search_window)
+    toolmenu.add_command(label="Manage Objects", command=show_manage_objs)
+
     menubar.add_cascade(label="Tools", menu=toolmenu)
 
     helpmenu = Menu(menubar, tearoff=0)
@@ -460,7 +466,7 @@ def place_current_objects(current_str: str, room_id: int):
 
 def update_room_details():
     if current_room:
-        temp_name = name_entry.get()
+        temp_name = room_name_entry.get()
         temp_desc = desc_text.get('1.0', END)
         # only rewrite if changed.
         if (not current_room.name == temp_name) or (not current_room.description == temp_desc):
@@ -473,7 +479,7 @@ def update_room_details():
 
 
 def draw_controls(window: Tk):
-    global db_lab, name_lab, name_entry, desc_text, button_pane, new_path_pane, data_pane, search_pane, current_text
+    global db_lab, name_lab, room_name_entry, desc_text, button_pane, new_path_pane, data_pane, search_pane, current_text
 
     db_lab = Label(window, text="Game file: none selected", bg=LIGHT_GRAY)
     db_lab.pack(side=TOP, pady=5, fill=X)
@@ -484,8 +490,8 @@ def draw_controls(window: Tk):
     entry_pane = Frame(room_pane, bg=LIGHT_GRAY)
     name_lab = Label(entry_pane, text="Room:", bg=LIGHT_GRAY)
     name_lab.pack(side=LEFT, padx=5)
-    name_entry = Entry(entry_pane, width=25)
-    name_entry.pack(side=LEFT, pady=5)
+    room_name_entry = Entry(entry_pane, width=25)
+    room_name_entry.pack(side=LEFT, pady=5)
     entry_pane.pack(side=TOP, pady=15)
 
     desc_text = Text(room_pane, width=60, height=8)
@@ -610,15 +616,13 @@ def add_unconnected_room():
 def add_path_to_room(from_id: int, direct_str: str, room_str: str, mutual: bool = False):
     direct_id = 0
     to_id = 0
-    match = regex.search(r": (\d+)$", direct_str)
-    if match:
-        direct_id = int(match.group(1))
-    else:
+
+    direct_id = get_id_from_string(direct_str)
+    if direct_id < 0:
         return
-    match = regex.search(r": (\d+)$", room_str)
-    if match:
-       to_id = int(match.group(1))
-    else:
+
+    to_id = get_id_from_string(room_str)
+    if to_id < 0:
         return
 
     if to_id == 0: # it's a new room, create an empty one first
@@ -780,12 +784,10 @@ def draw_new_path_controls(room_id: id):
 
 def go_to_room_from_combo(event):
     room_str = room_var_2.get()
-    match = regex.search(r": (\d+)$", room_str)
-    if match:
-       to_id = int(match.group(1))
-       go_to_room(to_id)
-    else:
+    to_id = get_id_from_string(room_str)
+    if to_id < 0:
         return
+    go_to_room(to_id)
 
 
 def set_combo_to_room_id(combo: ttk.Combobox, room_id: int):
@@ -819,9 +821,9 @@ def go_to_room(room_id):
         if name_lab:
             new_text = f'Room {room_id}:'
             name_lab.config(text=new_text)
-        if name_entry:
-            name_entry.delete(0, END)
-            name_entry.insert(0, next_room.name)
+        if room_name_entry:
+            room_name_entry.delete(0, END)
+            room_name_entry.insert(0, next_room.name)
         if desc_text:
             desc_text.delete('1.0', END)
             desc_text.insert('1.0', next_room.description)
@@ -1133,11 +1135,10 @@ def reveal_solution(solution: list):
 
 
 def generate_navigation_to_obj(from_room_str: str, to_obj_str: str):
-    match = regex.search(r": (\d+)$", to_obj_str)
-    if match:
-       to_id = int(match.group(1))
-    else:
+    to_id = get_id_from_string(to_obj_str)
+    if to_id < 0:
         return
+
     # find room where the object currently is
     obj: Object = None
     for obj in objs:
@@ -1150,16 +1151,14 @@ def generate_navigation_to_obj(from_room_str: str, to_obj_str: str):
 def generate_navigation(from_room_str: str, to_room_str: str):
     global search_success, nav_stack
     
-    match = regex.search(r": (\d+)$", from_room_str)
-    if match:
-        from_id = int(match.group(1))
-    else:
+    from_id = get_id_from_string(from_room_str)
+    if id < 0:
         return
-    match = regex.search(r": (\d+)$", to_room_str)
-    if match:
-       to_id = int(match.group(1))
-    else:
+
+    to_id = get_id_from_string(to_room_str)
+    if to_id < 0:
         return
+
     from_room = get_room_from_id(from_id)
     
     solutions = []
@@ -1249,6 +1248,73 @@ def show_obj_select(obj_list: list, name: str, room_id: int):
     ok_button = Button(select_win, text="OK", bg=LIGHT_GRAY, command=lambda: obj_combo_selected(obj_combo.get(), name, room_id, select_win))
     ok_button.pack(side=TOP, pady=5)
     select_win.mainloop()
+
+
+def get_obj_names():
+    ret_list = []
+    obj: Object = None
+    for obj in sorted(objs):
+        ret_list.append(f'{obj.name} : {obj.object_id}')
+    return ret_list
+
+
+def update_manage_objects(event):
+    if object_combo:
+        obj_str = object_combo.get()
+
+
+def show_manage_objs():
+    object_win = Tk()
+    centre_window(object_win, 500, 350)
+    object_win.title("Manage objects")
+    object_win.config(bg=LIGHT_GRAY)
+
+    combo_pane = Frame(object_win, bg=LIGHT_GRAY)
+    label = Label(combo_pane, text="Select object", bg=LIGHT_GRAY)
+    label.pack(side=TOP, pady=5)
+    object_combo = ttk.Combobox(combo_pane, width=20)
+    object_combo.pack(side=LEFT, padx=5)
+    object_combo.config(values=get_obj_names())
+    object_combo.current(0)
+    object_combo.pack(side=TOP, pady=5)
+    combo_pane.pack(side=TOP, pady=5)
+    object_combo.bind("<<ComboboxSelected>>", obj_selected)
+
+    name_pane = Frame(object_win, bg=LIGHT_GRAY)
+    name_lab = Label(name_pane, text="Name: ", bg=LIGHT_GRAY)
+    name_lab.pack(side=LEFT, padx=5)
+    obj_name_entry = Entry(name_pane, width=25)
+    obj_name_entry.pack(side=LEFT, padx=5)
+    name_pane.pack(side=TOP, pady=5)
+
+    alias_pane = Frame(object_win, bg=LIGHT_GRAY)
+    alias_lab = Label(alias_pane, text="Aliases: ", bg=LIGHT_GRAY)
+    alias_lab.pack(side=LEFT, padx=5)
+    obj_alias_entry = Entry(alias_pane, width=25)
+    obj_alias_entry.pack(side=LEFT, padx=5)
+    alias_pane.pack(side=TOP, pady=5)
+
+    found_pane = Frame(object_win, bg=LIGHT_GRAY)
+    found_lab = Label(found_pane, text="Room First Found: ", bg=LIGHT_GRAY)
+    found_lab.pack(side=LEFT, padx=5)
+    found_combo = ttk.Combobox(found_pane, width=20)
+    found_combo.pack(side=LEFT, padx=5)
+    found_combo.config(values=room_names_no_new())
+    found_combo.current(0)
+    found_pane.pack(side=TOP, pady=5)
+
+    current_pane = Frame(object_win, bg=LIGHT_GRAY)
+    current_lab = Label(current_pane, text="Room Now In: ", bg=LIGHT_GRAY)
+    current_lab.pack(side=LEFT, padx=5)
+    current_combo = ttk.Combobox(current_pane, width=20)
+    current_combo.pack(side=LEFT, padx=5)
+    current_combo.config(values=room_names_no_new())
+    current_combo.current(0)
+    current_pane.pack(side=TOP, pady=5)
+
+    ok_button = Button(object_win, text="OK", bg=LIGHT_GRAY)
+    ok_button.pack(side=TOP, pady=5)
+    object_win.mainloop()
 
 
 def show_search_window():
