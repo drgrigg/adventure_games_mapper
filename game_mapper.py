@@ -1105,7 +1105,8 @@ def search_outward(from_id: int, wanted_id: int):
         from_room = get_room_from_id(from_id)
         from_room.deadend = True
         logging("Dead end! Tried: " + list_nav_stack())
-        nav_stack.pop()
+        if nav_stack:
+            nav_stack.pop()
         return
         
     # pick one path at random
@@ -1152,7 +1153,7 @@ def generate_navigation(from_room_str: str, to_room_str: str):
     global search_success, nav_stack
     
     from_id = get_id_from_string(from_room_str)
-    if id < 0:
+    if from_id < 0:
         return
 
     to_id = get_id_from_string(to_room_str)
@@ -1258,12 +1259,43 @@ def get_obj_names():
     return ret_list
 
 
-def update_manage_objects(event):
+def update_manage_objs_form(event):
+    global obj_name_entry, obj_alias_entry, found_combo, current_combo
     if object_combo:
         obj_str = object_combo.get()
+        obj_id = get_id_from_string(obj_str)
+        if obj_id < 0:
+            return
+        obj = get_object_from_id(obj_id)
+        obj_name_entry.delete(0, END)
+        obj_name_entry.insert(0, obj.name)
+        obj_alias_entry.delete(0, END)
+        if obj.aliases:
+            obj_alias_entry.insert(0, obj.aliases)
+        set_combo_to_room_id(found_combo, obj.found_id)
+        set_combo_to_room_id(current_combo, obj.current_id)
+
+
+def update_object_details(obj_id_str: str, name: str, alias: str, found_str: str, current_str: str):
+    obj_id = get_id_from_string(obj_id_str)
+    if obj_id < 0:
+        return
+    obj = get_object_from_id(obj_id)
+    if obj:
+        obj.name = name
+        obj.aliases = alias
+        found_id = get_id_from_string(found_str)
+        if found_id >= 0:
+            obj.found_id = found_id
+        current_id = get_id_from_string(current_str)
+        if current_id:
+            obj.current_id = current_id
+        sql = f'UPDATE OBJECTS SET Name = "{name}", Aliases = "{alias}", FoundRoom = {found_id}, CurrentRoom = {found_id} WHERE ID={obj.object_id}'
+        db_execute(sql)
 
 
 def show_manage_objs():
+    global object_combo, obj_name_entry, obj_alias_entry, found_combo, current_combo
     object_win = Tk()
     centre_window(object_win, 500, 350)
     object_win.title("Manage objects")
@@ -1278,7 +1310,7 @@ def show_manage_objs():
     object_combo.current(0)
     object_combo.pack(side=TOP, pady=5)
     combo_pane.pack(side=TOP, pady=5)
-    object_combo.bind("<<ComboboxSelected>>", obj_selected)
+    object_combo.bind("<<ComboboxSelected>>", update_manage_objs_form)
 
     name_pane = Frame(object_win, bg=LIGHT_GRAY)
     name_lab = Label(name_pane, text="Name: ", bg=LIGHT_GRAY)
@@ -1312,8 +1344,13 @@ def show_manage_objs():
     current_combo.current(0)
     current_pane.pack(side=TOP, pady=5)
 
-    ok_button = Button(object_win, text="OK", bg=LIGHT_GRAY)
+    ok_button = Button(object_win, text="Update This Object", bg=LIGHT_GRAY, 
+        command=lambda: update_object_details(object_combo.get(), obj_name_entry.get(), obj_alias_entry.get(), found_combo.get(), current_combo.get()))
     ok_button.pack(side=TOP, pady=5)
+
+    reset_button = Button(object_win, text="Return All Objects to Starting Positions", bg=LIGHT_GRAY)
+    reset_button.pack(side=TOP, pady=25)
+
     object_win.mainloop()
 
 
