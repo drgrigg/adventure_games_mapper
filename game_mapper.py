@@ -9,6 +9,8 @@ from tkinter import *
 from tkinter import ttk
 from tkinter import filedialog as fd
 from tkinter import scrolledtext
+import heapq
+
 
 import regex
 import sqlite3
@@ -115,6 +117,61 @@ class Object():
             if self.name < other.name:
                 return True
         return False     
+
+def dijkstra(graph, start, end):
+    """
+    Find the shortest path between start and end nodes in a graph using Dijkstra's algorithm.
+    
+    Args:
+    - graph: a dictionary representing the graph, where the keys are the nodes and the values
+      are lists of tuples representing the edges and their weights, e.g. {'A': [('B', 1), ('C', 4)], ...}
+    - start: the starting node
+    - end: the ending node
+    
+    Returns:
+    - A list of nodes representing the shortest path between start and end nodes
+    """
+    predecessors = {node: None for node in graph}
+    visited = set()
+    pq = [(0, start)] # priority queue of (distance, node)
+    while pq:
+        (dist, curr_node) = heapq.heappop(pq)
+        if curr_node == end:
+            # Found the shortest path!
+            path = []
+            while curr_node != start:
+                path.append(curr_node)
+                curr_node = predecessors[curr_node]
+            path.append(start)
+            return path[::-1]
+        if curr_node in visited:
+            continue
+        visited.add(curr_node)
+        for (next_node, weight) in graph[curr_node]:
+            if next_node not in visited:
+                predecessors[next_node] = curr_node
+                heapq.heappush(pq, (dist + weight, next_node))
+    # No path found
+    return []
+
+def generate_graph():
+    """
+    Generate a graph dictionary suitable for the Dijkstra function.
+
+    Args:
+    - obj_list: a list of objects, each with properties `id` and `connections` representing the ID
+      of the object and a list of the IDs of objects to which it is connected.
+
+    Returns:
+    - A dictionary representing the graph, where the keys are the IDs of the objects and the values
+      are lists of tuples representing the edges and their weights.
+    """
+    graph = {}
+    for room in rooms:
+        connections = get_outward_rooms(room.id)
+        edges = [(conn_id, 1) for conn_id in connections] # Assuming all edges have weight 1
+        graph[room.id] = edges
+    return graph
 
 
 folder = os.path.normpath(sys.argv[0])
@@ -545,6 +602,12 @@ def get_path_from_id(id: int) -> Direction:
             return path
     return None
 
+def get_path_from_ends(from_id: int, to_id: int) -> Path:
+    for path in paths:
+        if path.from_room.id == from_id and path.to_room.id == to_id:
+            return path
+    return None
+
 def get_outward_paths(room_id: int) -> list:
     path_list = []
     for path in paths:
@@ -553,6 +616,13 @@ def get_outward_paths(room_id: int) -> list:
                 path_list.append(path)
     return path_list
 
+def get_outward_rooms(room_id: int) -> list:
+    outrooms = []
+    for path in paths:
+        if path.from_room:
+            if path.from_room.id == room_id:
+                outrooms.append(path.to_room.id)
+    return outrooms
 
 def get_unvisited_paths(room_id: int) -> list:
     path_list = []
@@ -602,12 +672,9 @@ def get_max_room_distance() -> float:
 
 def add_unconnected_room():
     # it's a new room, create an empty one first
-    # we need to place it geometrically in a different area until we update it with a new path to it
-    fudge = int(get_max_room_distance()) + 50.0
-    sql = f'INSERT INTO ROOMS (Name, Description, X, Y, Z) VALUES ("New Room", "Description", {fudge}, {fudge}, {0.0})'
+    sql = f'INSERT INTO ROOMS (Name, Description) VALUES ("New Room", "Description")'
     current_id = db_execute_get_id(sql)
     new_room = Room(current_id, "New Room", "Description")
-    new_room.set_position(fudge, fudge, 0.0)
     rooms.append(new_room)
     update_room_details()  #updates current room
     go_to_room(current_id)
@@ -1151,6 +1218,8 @@ def generate_navigation_to_obj(from_room_str: str, to_obj_str: str):
 
 def generate_navigation(from_room_str: str, to_room_str: str):
     global search_success, nav_stack
+
+    graph = generate_graph()
     
     from_id = get_id_from_string(from_room_str)
     if from_id < 0:
@@ -1159,37 +1228,17 @@ def generate_navigation(from_room_str: str, to_room_str: str):
     to_id = get_id_from_string(to_room_str)
     if to_id < 0:
         return
+   
+    found_path = dijkstra(graph, from_id, to_id)
 
-    from_room = get_room_from_id(from_id)
-    
-    solutions = []
-    
-    for room in rooms:
-        room.deadend = False
-    
-    # loop through this lots of times (taking random walks)
-    for _ in range(0, 50):
-        nav_stack = []
-        for room in rooms:
-            room.visited = False
-        from_room.visited = True
-        search_success = False
-        search_outward(from_id, to_id)
-        if search_success:
-            temp = [] # need to COPY values
-            for path in nav_stack:
-                temp.append(path)
-            solutions.append(temp) 
-    
-    if solutions:
-        # find shortest one
-        best = solutions[0]
-        shortest = 10000
-        for solution in solutions:
-            if len(solution) < shortest:
-                shortest = len(solution)
-                best = solution
-        reveal_solution(best)
+    if found_path:
+        nav_str = ""
+        for index in range(0,len(found_path) - 1):
+            leg = get_path_from_ends(found_path[index], found_path[index+1])
+            if leg:
+                nav_str += f"{leg.direction.name} to {leg.to_room.name}\n"
+        results_text.delete("1.0", END)
+        results_text.insert(END, nav_str)
     else:
         results_text.delete("1.0", END)
         results_text.insert(END, "No path exists")
