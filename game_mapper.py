@@ -10,10 +10,14 @@ from tkinter import ttk
 from tkinter import filedialog as fd
 from tkinter import scrolledtext
 import heapq
+import numpy as np
 
 
 import regex
 import sqlite3
+
+CANVAS_WIDTH = 1490
+CANVAS_HEIGHT = 950
 
 class Direction():
     id = 0
@@ -179,7 +183,7 @@ folder_bits = os.path.split(folder)
 my_folder = folder_bits[0]
 sql_statements = []
 
-with open(os.path.join(".", "create_new.sql"), "r") as sfile:
+with open(os.path.join(my_folder, "create_new.sql"), "r") as sfile:
     sql_statements = sfile.readlines()
     sfile.close()
 
@@ -741,6 +745,62 @@ def db_execute_get_id(sql) -> int:
 
 recurse_depth = 0
 
+def adjust_positions(positions, min_distance, max_distance, max_iterations=1000, distance_tolerance=1e-6):
+    """
+    Adjusts the positions of objects such that each object is at least
+    `min_distance` away from the nearest object, but no more than
+    `max_distance` away from the nearest object.
+
+    Args:
+        positions (ndarray): A 2D array of shape (N, 2) containing the
+            initial positions of the objects.
+        min_distance (float): The minimum distance that each object should be
+            from its nearest neighbor.
+        max_distance (float): The maximum distance that each object should be
+            from its nearest neighbor.
+        max_iterations (int): The maximum number of iterations to perform.
+        distance_tolerance (float): The tolerance level for the distances.
+
+    Returns:
+        ndarray: A 2D array of shape (N, 2) containing the adjusted positions
+        of the objects.
+    """
+
+    num_objects = positions.shape[0]
+    new_positions = positions.copy()
+
+    for iteration in range(max_iterations):
+        # Compute the distances between the current object and all other objects
+        distances = np.linalg.norm(new_positions[:, np.newaxis] - new_positions, axis=2)
+
+        # Set the distance to itself to infinity so it is not selected as the minimum
+        np.fill_diagonal(distances, np.inf)
+
+        # Find the nearest object
+        nearest = np.argmin(distances, axis=1)
+
+        # Compute the distance to the nearest object
+        dist = distances[np.arange(num_objects), nearest]
+
+        # If the distance is less than `min_distance`, move the object away from the
+        # nearest object by `min_distance - dist`. If the distance is greater than
+        # `max_distance`, move the object towards the nearest object by `dist - max_distance`.
+        mask = (dist < min_distance - distance_tolerance) | (dist > max_distance + distance_tolerance)
+        if not mask.any():
+            break
+        for i in np.where(mask)[0]:
+            if dist[i] == 0:
+                continue
+            if dist[i] < min_distance - distance_tolerance:
+                direction = (new_positions[i] - new_positions[nearest[i]]) / dist[i]
+                new_positions[i] += direction * (min_distance - dist[i])
+            elif dist[i] > max_distance + distance_tolerance:
+                direction = (new_positions[nearest[i]] - new_positions[i]) / dist[i]
+                new_positions[i] += direction * (dist[i] - max_distance)
+
+    return new_positions
+
+
 def set_room_coordinates(path: Path, outward: bool = True):
     # set room coordinates based on path direction
     direction = path.direction
@@ -782,7 +842,7 @@ def get_distance_to_nearest(this_room) -> float:
 def reset_room_coordinates(room: Room):
     global recurse_depth
     recurse_depth += 1
-    if recurse_depth > 2 or recurse_depth < 0:
+    if recurse_depth > 4 or recurse_depth < 0:
         return
     # print(f"depth is {recurse_depth} within : {room.name}")
     out_paths = get_outward_paths(room.id)
@@ -810,6 +870,15 @@ def reset_all_room_coordinates(starting_room: Room):
 
     starting_room.visited = True
     reset_room_coordinates(starting_room)
+
+    positions = np.zeros((len(rooms), 2))
+    for i, room in enumerate(rooms):
+        positions[i, 0] = room.xpos
+        positions[i, 1] = room.ypos
+    new_positions = adjust_positions(positions=positions, max_distance=50, min_distance=10)
+    for i, room in enumerate(rooms):
+        room.xpos = new_positions[i, 0]
+        room.ypos = new_positions[i, 1]
 
 
 def draw_new_path_controls(room_id: id):
@@ -1040,7 +1109,7 @@ def show_map_window():
     map_window = Tk()
     centre_window(map_window, 1500, 1000)
     map_window.title("Map")
-    map_canvas = Canvas(map_window, bg='#EEEEEE', width=1490, height=950)
+    map_canvas = Canvas(map_window, bg='#EEEEEE', width=CANVAS_WIDTH, height=CANVAS_HEIGHT)
     draw_legend(map_canvas)
     map_canvas.pack(fill=BOTH)
     map_canvas.bind("<Button>", map_clicked)
@@ -1116,6 +1185,11 @@ def draw_paths():
         start_x, start_y = start_connect
         end_x, end_y = end_connect
 
+        if end_x < 50 or end_y < 50 or start_x < 50 or start_y < 50:
+            continue
+        if end_x > (CANVAS_WIDTH - 50) or end_y > (CANVAS_HEIGHT - 50) or start_x > (CANVAS_WIDTH - 50) or start_y > (CANVAS_HEIGHT - 50):
+            continue
+
         if path.direction.id in [1,2,3,4,13,15]:  # N, NE, E, SE, Port, Afore
             map_canvas.create_line(start_x, start_y, end_x, end_y, fill=path.direction.colour, arrow=FIRST, width=2)
         elif path.direction.id in [5,6,7,8,14,16]: # S, SW, W, NW, Starboard, Astern
@@ -1140,6 +1214,10 @@ def draw_rooms(do_draw: bool = False):
     for room in rooms:   
         if (room.visited):
             x, y = factored_point((room.xpos, room.ypos))
+            if x < 50 or y < 50:
+                continue
+            if x > CANVAS_WIDTH - 50 or y > CANVAS_HEIGHT - 50:
+                continue
             # create text so we can measure it
             myText = map_canvas.create_text(x, y, anchor=CENTER, justify=CENTER,text=room.name, tags="roomtext")
             bounds = map_canvas.bbox(myText)
@@ -1164,35 +1242,7 @@ def list_nav_stack() -> str:
     for path in nav_stack:
         accum += path.from_room.name + "->"
     return accum
-
-def search_outward(from_id: int, wanted_id: int):
-    global nav_stack, search_success, rooms
-    out_paths = get_unvisited_paths(from_id)  # also rejects deadend rooms
-    if not out_paths:  # we've reached a deadend, mark it as such
-        from_room = get_room_from_id(from_id)
-        from_room.deadend = True
-        logging("Dead end! Tried: " + list_nav_stack())
-        if nav_stack:
-            nav_stack.pop()
-        return
-        
-    # pick one path at random
-    if len(out_paths) <= 1:
-        path = out_paths[0]
-    else:
-        index = randint(0, len(out_paths)-1)
-        path = out_paths[index]
-    nav_stack.append(path)
-    # logging(f"checking {path.from_room.name} -> {path.to_room.name}")
-    
-    if path.to_room.id == wanted_id:
-        logging("Found!" + list_nav_stack() + "->" + path.to_room.name)
-        search_success = True
-        return
-    else:
-        path.to_room.visited = True
-        search_outward(path.to_room.id, wanted_id) # recursive!!
-        
+      
 
 def reveal_solution(solution: list):
     nav_str = ""
