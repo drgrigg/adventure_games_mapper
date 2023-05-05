@@ -1242,35 +1242,7 @@ def list_nav_stack() -> str:
     for path in nav_stack:
         accum += path.from_room.name + "->"
     return accum
-
-# def xx_search_outward(from_id: int, wanted_id: int):
-#     global nav_stack, search_success, rooms
-#     out_paths = get_unvisited_paths(from_id)  # also rejects deadend rooms
-#     if not out_paths:  # we've reached a deadend, mark it as such
-#         from_room = get_room_from_id(from_id)
-#         from_room.deadend = True
-#         logging("Dead end! Tried: " + list_nav_stack())
-#         if nav_stack:
-#             nav_stack.pop()
-#         return
-        
-#     # pick one path at random
-#     if len(out_paths) <= 1:
-#         path = out_paths[0]
-#     else:
-#         index = randint(0, len(out_paths)-1)
-#         path = out_paths[index]
-#     nav_stack.append(path)
-#     # logging(f"checking {path.from_room.name} -> {path.to_room.name}")
-    
-#     if path.to_room.id == wanted_id:
-#         logging("Found!" + list_nav_stack() + "->" + path.to_room.name)
-#         search_success = True
-#         return
-#     else:
-#         path.to_room.visited = True
-#         xx_search_outward(path.to_room.id, wanted_id) # recursive!!
-        
+      
 
 def reveal_solution(solution: list):
     nav_str = ""
