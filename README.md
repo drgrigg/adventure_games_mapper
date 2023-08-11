@@ -12,7 +12,7 @@ I can run these in dosbox on my Mac, but when I went looking for tools to help m
 
 ![sample_main](https://user-images.githubusercontent.com/7020970/171783409-5a833a2c-d26d-4022-943b-09abfe3780fb.jpg)
 
-The software requires the user to manually note the names of rooms as they are entered, and creating paths either to existing rooms or to a new room. It's also very useful to record for each room the obvious exits and any objects found there. This is pretty simple and quick. All information is stored in a sqlite database specific to the particular game you are working on.
+The software requires the user to manually note the names of rooms as they are entered, and creating paths either to existing rooms or to a new room. It's also very useful to record for each room the obvious exits and any objects found there. (Or if you can, copy and paste the entire room desription here).This is pretty simple and quick. All information is stored in a sqlite database specific to the particular game you are working on.
 
 ### Show Map
 
@@ -24,7 +24,7 @@ The mapping is a little clumsy because the connections in such games can be quit
 
 ![sample_paths](https://user-images.githubusercontent.com/7020970/171783444-077083f9-e2e4-47b1-9341-cc4a77fe97e5.jpg)
 
-This is an experimental feature to find the shortest path between two rooms. Sometimes it fails, but generally it will work, if not on the first try then the second. This can be great for finding a quick way to a room where you've left something. The 'Swap' button will allow you to generate the reverse journey.
+This uses the Djikstra algorithm to find the shortest path between two rooms. This can be great for finding a quick way to a room where you've left something. The 'Swap' button will allow you to generate the reverse journey. It doesn't take into account "magic" passageways where some special action is required to open the way, so sometimes the "shortest" journey isn't practicable. Still, most of the time it's very useful.
 
 ### Search Rooms
 
